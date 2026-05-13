@@ -5,8 +5,8 @@ This package is a reference implementation for a Python-call DSL harness:
 1. Codex Spark returns ordinary chat text plus one fenced `python` action block.
 2. The adapter extracts that block and parses it with Python's built-in `ast`
    module.
-3. Parsed calls are converted into normal A2A text responses or tool-call
-   DataParts for the evaluator.
+3. Parsed calls are converted into normal A2A text Parts or tool-call data
+   Parts for the evaluator.
 
 The generated Python is never executed. This is inspired by programmatic tool
 calling, but it is not true code execution and it does not add hidden tools.
@@ -62,8 +62,10 @@ uv run car-bench-run scenarios/agent_under_test_codex_python/smoke.toml --show-l
 
 ```bash
 uv run python generate_compose.py --scenario scenarios/agent_under_test_codex_python/docker-local.toml
-mkdir -p output
-docker compose up --abort-on-container-exit
+docker compose --env-file .env -f scenarios/agent_under_test_codex_python/docker-compose.yml up --abort-on-container-exit
 ```
 
 Set `CODEX_HOME_HOST` in `.env` to an absolute host path containing Codex auth.
+Prefer creating a dedicated benchmark home with
+`CODEX_HOME="$HOME/.codex-car-bench" codex login` instead of mounting your
+everyday Codex desktop/app state.

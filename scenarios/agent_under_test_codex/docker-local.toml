@@ -4,8 +4,7 @@
 #   1. Authenticate Codex on the host.
 #   2. Set CODEX_HOME_HOST in .env to the absolute authenticated Codex home.
 #   3. uv run python generate_compose.py --scenario scenarios/agent_under_test_codex/docker-local.toml
-#   4. mkdir -p output
-#   5. docker compose up --abort-on-container-exit
+#   4. docker compose --env-file .env -f scenarios/agent_under_test_codex/docker-compose.yml up --abort-on-container-exit
 
 [evaluator]
 build = { context = ".", dockerfile = "src/evaluator/Dockerfile.evaluator" }

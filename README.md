@@ -243,8 +243,8 @@ uv run python generate_compose.py --scenario scenarios/agent_under_test/docker-l
 ```
 
 ```bash
-# 2. Run evaluation (builds images automatically)
-docker compose -f scenarios/agent_under_test/docker-compose.yml up --abort-on-container-exit
+# 2. Run evaluation from the repository root (builds images automatically)
+docker compose --env-file .env -f scenarios/agent_under_test/docker-compose.yml up --abort-on-container-exit
 ```
 
 **What happens:**
@@ -263,6 +263,23 @@ For the planner/executor Codex harness, use
 [`scenarios/agent_under_test_codex_planner/docker-local.toml`](scenarios/agent_under_test_codex_planner/docker-local.toml).
 For the Python-call DSL Codex harness, use
 [`scenarios/agent_under_test_codex_python/docker-local.toml`](scenarios/agent_under_test_codex_python/docker-local.toml).
+
+For Codex Docker runs, prefer a dedicated benchmark Codex home instead of
+mounting your everyday Codex desktop/app state:
+
+```bash
+mkdir -p "$HOME/.codex-car-bench"
+CODEX_HOME="$HOME/.codex-car-bench" codex login
+CODEX_HOME="$HOME/.codex-car-bench" codex login status
+```
+
+Then set the absolute path in `.env`:
+
+```bash
+CODEX_HOME_HOST=/Users/yourname/.codex-car-bench
+GEMINI_API_KEY=...
+LOGURU_LEVEL=DEBUG
+```
 
 ---
 
@@ -283,15 +300,16 @@ docker push ghcr.io/yourusername/your-agent:latest
 ```bash
 # Update scenarios/agent_under_test/ghcr.toml with your image URLs
 uv run python generate_compose.py --scenario scenarios/agent_under_test/ghcr.toml
-docker compose -f scenarios/agent_under_test/docker-compose.yml up --abort-on-container-exit
+docker compose --env-file .env -f scenarios/agent_under_test/docker-compose.yml up --abort-on-container-exit
 ```
 
 **Configuration**: Edit [`scenarios/agent_under_test/ghcr.toml`](scenarios/agent_under_test/ghcr.toml) with your GHCR image URLs
 
 Generated Docker files are ignored by git and written into the scenario folder:
 `docker-compose.yml` and `a2a-scenario.toml`. Results are written under
-`output/<agent-name>/` with filenames that include timestamp, scenario, model,
-and reasoning-effort hints when the scenario exposes them.
+`output/<agent-name>/` with filenames that include timestamp, scenario, task
+selection, trial count, and only reliable agent-under-test model/reasoning hints
+when the scenario exposes them.
 
 ---
 
@@ -629,10 +647,13 @@ src/
 │   ├── planner_agent.py           # Plan once per user turn + Spark executor
 │   ├── server.py                  # A2A server entrypoint
 │   └── Dockerfile.agent-under-test-codex-planner
-└── agent_under_test_codex_python/ # Codex Python-call DSL agent under test
-    ├── python_call_agent.py       # AST parser + Python-call next-action logic
-    ├── server.py                  # A2A server entrypoint
-    └── Dockerfile.agent-under-test-codex-python
+├── agent_under_test_codex_python/ # Codex Python-call DSL agent under test
+│   ├── python_call_agent.py       # AST parser + Python-call next-action logic
+│   ├── server.py                  # A2A server entrypoint
+│   └── Dockerfile.agent-under-test-codex-python
+├── tool_call_types.py             # Shared A2A tool-call payload models
+├── turn_metrics.py                # Shared turn-metric metadata keys
+└── logging_utils.py               # Shared structured logging setup
 
 scenarios/
 ├── README.md                      # Scenario map
@@ -667,7 +688,7 @@ third_party/
 
 Want to build and test your own agent? The **agent under test** receives tasks from the CAR-bench evaluator via the **A2A protocol** and responds with tool calls or text.
 
-**[Full Development Guide →](src/agent_under_test/DEVELOPMENT_GUIDE.md)** — Covers the message protocol, conversation lifecycle, and everything you need to implement a custom agent.
+**[Full Development Guide →](docs/development-guide.md)** — Covers the message protocol, conversation lifecycle, and everything you need to implement a custom agent.
 
 **[A2A Introduction →](docs/a2a-introduction.md)** — Background protocol walkthrough with examples from this repository.
 
@@ -679,10 +700,10 @@ Want to build and test your own agent? The **agent under test** receives tasks f
 
 | Concept | Details |
 |---------|---------|
-| **Protocol** | A2A (Agent-to-Agent) using `TextPart` and `DataPart` message parts |
-| **First message** | `TextPart` with system prompt + user message, `DataPart` with tool definitions |
-| **Subsequent messages** | `DataPart` with tool results or `TextPart` with the next user utterance |
-| **Response format** | `TextPart` (text), `DataPart` (tool calls via `ToolCallsData`), or both |
+| **Protocol** | A2A (Agent-to-Agent) using text and data message Parts |
+| **First message** | Text Part with system prompt + user message, data Part with tool definitions |
+| **Subsequent messages** | Data Part with tool results or text Part with the next user utterance |
+| **Response format** | Text Part, data Part with tool calls via `ToolCallsData`, or both |
 | **State management** | Maintain conversation history per `context_id` |
 
 ### Reference Implementations
@@ -692,7 +713,7 @@ The baseline agent in [`src/agent_under_test/`](src/agent_under_test/) is the sm
 | File | Purpose |
 |------|---------|
 | [`car_bench_agent.py`](src/agent_under_test/car_bench_agent.py) | Agent logic — message parsing, LLM calls, response building |
-| [`tool_call_types.py`](src/agent_under_test/tool_call_types.py) | `ToolCall` and `ToolCallsData` Pydantic models |
+| [`src/tool_call_types.py`](src/tool_call_types.py) | Shared `ToolCall` and `ToolCallsData` Pydantic models |
 | [`server.py`](src/agent_under_test/server.py) | HTTP server setup and `AgentCard` configuration |
 
 You can use **any LLM provider or framework** — the only requirement is conforming to the A2A message protocol.

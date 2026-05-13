@@ -2,6 +2,11 @@ import unittest
 
 from google.protobuf.json_format import MessageToDict
 
+from a2a.helpers.proto_helpers import new_text_part
+from agentbeats.sync_client import (
+    build_send_message_jsonrpc_request,
+    create_message_with_parts,
+)
 from agent_under_test_codex.car_bench_agent import CARBenchAgentExecutor
 from agent_under_test_codex.codex_client import CodexTokenUsage, add_token_usage
 from agent_under_test_codex_planner.planner_agent import (
@@ -20,6 +25,22 @@ from turn_metrics import (
 
 
 class A2AResponseContractTest(unittest.TestCase):
+    def test_sync_client_serializes_a2a_1_json_field_names(self) -> None:
+        message = create_message_with_parts(
+            parts=[new_text_part("hello")],
+            context_id="ctx-1",
+        )
+
+        payload = build_send_message_jsonrpc_request(message)
+        serialized_message = payload["params"]["message"]
+
+        self.assertEqual(payload["method"], "SendMessage")
+        self.assertIn("messageId", serialized_message)
+        self.assertIn("contextId", serialized_message)
+        self.assertNotIn("message_id", serialized_message)
+        self.assertNotIn("context_id", serialized_message)
+        self.assertEqual(serialized_message["parts"], [{"text": "hello"}])
+
     def test_codex_token_usage_parses_app_server_notification_payload(self) -> None:
         usage = CodexTokenUsage.from_app_server(
             {

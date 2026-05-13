@@ -13,32 +13,37 @@ higher-level harness architecture and extension patterns.
 
 The evaluator sends one A2A message per assistant step:
 
-- First turn: a `TextPart` containing `System: <wiki>\n\nUser: <request>` plus a
-  `DataPart` containing `{"tools": [...]}` in OpenAI function-calling format.
-- Tool-result turn: a `DataPart` containing `{"tool_results": [...]}`.
-- User follow-up turn: a `TextPart` containing the simulated user's next message.
+- First turn: a text Part containing `System: <wiki>\n\nUser: <request>` plus a
+  data Part containing `{"tools": [...]}` in OpenAI function-calling format.
+- Tool-result turn: a data Part containing `{"tool_results": [...]}`.
+- User follow-up turn: a text Part containing the simulated user's next message.
 
 The agent under test returns one A2A message:
 
-- User-facing response: `TextPart("...")`.
-- Tool call response: `DataPart({"tool_calls": [{"tool_name": "...", "arguments": {...}}]})`.
-- Optional debug reasoning: `DataPart({"reasoning_content": "..."})`.
+- User-facing response: text Part with the spoken response.
+- Tool call response: data Part with `{"tool_calls": [{"tool_name": "...", "arguments": {...}}]}`.
+- Optional debug reasoning: data Part with `{"reasoning_content": "..."}`.
 
 The evaluator wrapper converts these A2A parts back into the OpenAI-style assistant
 message format expected by CAR-bench core. Do not execute vehicle tools inside
 the agent under test; doing so bypasses the benchmark.
 
+The A2A spec still uses conceptual names like `TextPart` and `DataPart`, but
+this repository uses `a2a-sdk` 1.0 protobuf `Part` objects. Build them with
+`a2a.helpers.proto_helpers.new_text_part(...)` / `new_data_part(...)` and parse
+them with `part.WhichOneof("content")`.
+
 ## Harness Pattern
 
 A robust agent-under-test harness usually has four layers:
 
-1. **A2A parser**: Reads `TextPart` and `DataPart`, extracts the system prompt,
+1. **A2A parser**: Reads text and data Parts, extracts the system prompt,
    user text, tool definitions, and tool results.
 2. **Conversation store**: Maintains per-`context_id` history. This prevents one
    benchmark task from leaking into another.
 3. **Inference adapter**: Calls your model/runtime and asks for one next action:
    either tool calls or a user-facing response.
-4. **A2A renderer**: Converts the model output into `TextPart`/`DataPart` while
+4. **A2A renderer**: Converts the model output into text/data Parts while
    attaching optional turn metrics.
 
 The Codex implementation in `src/agent_under_test_codex/` follows this
@@ -146,5 +151,5 @@ an unconstrained coding workspace or hidden multi-agent system.
 - Swap the inference adapter for another runtime while reusing the parser,
   conversation store, renderer, and metrics code.
 - Add native dynamic tools only after the JSON-output MVP is stable; if you do,
-  mirror every dynamic tool call back into the `tool_calls` DataPart shape so
+  mirror every dynamic tool call back into the `tool_calls` data-Part shape so
   CAR-bench trajectories remain comparable.

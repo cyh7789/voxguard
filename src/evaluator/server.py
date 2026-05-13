@@ -44,7 +44,7 @@ def car_bench_evaluator_agent_card(name: str, url: str) -> AgentCard:
         default_output_modes=["text/plain", "application/json"],
     )
 
-    # Supported interfaces (replaces legacy url field)
+    # A2A 1.0 supported interface.
     iface = card.supported_interfaces.add()
     iface.url = url
     iface.protocol_binding = "JSONRPC"

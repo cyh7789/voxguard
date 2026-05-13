@@ -76,7 +76,7 @@ A2A input from the evaluator
   -> build transcript and task-filtered tool prompt
   -> Codex Spark next-action JSON
   -> parse JSON
-  -> return TextPart or DataPart(tool_calls) to the evaluator
+  -> return text Part or data Part(tool_calls) to the evaluator
 ```
 
 This is the lowest-latency and easiest-to-debug pattern. It is the best first
@@ -86,7 +86,7 @@ target before trying multi-pass harnesses.
 
 Use a larger model only to write a compact plan, then let Spark produce the final
 benchmark action. The plan must be internal. The evaluator should only receive the final
-TextPart or tool-call DataPart.
+text Part or tool-call data Part.
 
 The reference planner runs once after a user message. If the executor returns
 tool calls, the evaluator executes them and sends tool observations back; those
@@ -303,7 +303,7 @@ This is inspired by programmatic tool calling, but it is not true code
 execution. Codex is not given shell, file, network, or hidden vehicle tools.
 The generated Python is parsed with Python's built-in `ast` module, never
 executed, and then mapped back into the normal A2A text response or
-`tool_calls` DataPart that the evaluator already understands.
+`tool_calls` data Part that the evaluator already understands.
 
 The older structured envelope is still accepted as a parser fallback:
 

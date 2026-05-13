@@ -10,12 +10,11 @@ from a2a.client import (
 )
 from a2a.types import (
     Message,
-    Part,
     Role,
     SendMessageRequest,
     StreamResponse,
 )
-from a2a.helpers.proto_helpers import new_text_part, new_data_part
+from a2a.helpers.proto_helpers import new_text_part
 from google.protobuf.json_format import MessageToDict
 
 

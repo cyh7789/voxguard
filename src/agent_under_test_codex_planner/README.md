@@ -51,8 +51,10 @@ uv run car-bench-run scenarios/agent_under_test_codex_planner/smoke.toml --show-
 
 ```bash
 uv run python generate_compose.py --scenario scenarios/agent_under_test_codex_planner/docker-local.toml
-mkdir -p output
-docker compose up --abort-on-container-exit
+docker compose --env-file .env -f scenarios/agent_under_test_codex_planner/docker-compose.yml up --abort-on-container-exit
 ```
 
 Set `CODEX_HOME_HOST` in `.env` to an absolute host path containing Codex auth.
+Prefer creating a dedicated benchmark home with
+`CODEX_HOME="$HOME/.codex-car-bench" codex login` instead of mounting your
+everyday Codex desktop/app state.

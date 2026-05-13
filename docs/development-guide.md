@@ -37,7 +37,7 @@ CAR-bench evaluator through the same **A2A (Agent-to-Agent) protocol**.
 ```
 ┌─────────────────────┐        A2A Messages        ┌─────────────────────┐
 │ Evaluator           │ ◄────────────────────────► │ Agent Under Test    │
-│ (CAR-bench)         │    TextPart + DataPart     │ (Your Agent)        │
+│ (CAR-bench)         │    text Part + data Part   │ (Your Agent)        │
 └─────────────────────┘                             └─────────────────────┘
 ```
 
@@ -47,14 +47,25 @@ The evaluator wraps the CAR-bench environment. It sends system prompt, available
 
 ## A2A Message Protocol
 
-All messages are exchanged as a list of **Parts**. Each Part is one of:
+All messages are exchanged as a list of **Parts**. In A2A 1.0, the Python SDK
+represents these as protobuf `Part` objects with a `content` oneof. The
+wire-level part kind is selected by which field is set:
 
-| Part Type    | Purpose                              | Examples                                    |
-|-------------|--------------------------------------|---------------------------------------------|
-| **TextPart** | Natural language content             | System prompt, user message, text responses |
-| **DataPart** | Structured/machine-readable data     | Tool definitions, tool calls, reasoning     |
+| Part field | Purpose | Examples |
+|------------|---------|----------|
+| `text` | Natural language content | System prompt, user message, text responses |
+| `data` | Structured/machine-readable data | Tool definitions, tool calls, reasoning |
 
-A single message can contain **multiple Parts** of different types. For example, a response can have a `TextPart` (explanation) and a `DataPart` (tool calls) simultaneously.
+A single message can contain **multiple Parts** of different types. For
+example, a response can have one text Part for the user-facing message and one
+data Part for tool calls.
+
+> **A2A SDK 1.0 note:** older examples and the protocol prose may say
+> `TextPart` / `DataPart`. In this repository's locked `a2a-sdk>=1.0` setup,
+> do not import or instantiate `TextPart` or `DataPart` classes. Use
+> `a2a.helpers.proto_helpers.new_text_part(...)` and
+> `new_data_part(...)`, then inspect inbound parts with
+> `part.WhichOneof("content")`.
 
 ---
 
@@ -66,14 +77,14 @@ The first message in a conversation contains **two Parts**:
 
 | Part | Type | Content |
 |------|------|---------|
-| 1    | `TextPart` | Combined system prompt and user message, formatted as: `"System: <policies and instructions>\n\nUser: <initial task>"` |
-| 2    | `DataPart` | Tool definitions in `{"tools": [...]}` format (OpenAI function calling schema) |
+| 1    | text Part | Combined system prompt and user message, formatted as: `"System: <policies and instructions>\n\nUser: <initial task>"` |
+| 2    | data Part | Tool definitions in `{"tools": [...]}` format (OpenAI function calling schema) |
 
 **What each part contains:**
 
-- **TextPart** — The `System:` section includes all 19 CAR-bench policies the agent must follow (e.g., check weather before opening sunroof, validate addresses). The `User:` section is the initial user request (e.g., "Navigate to Munich city center").
+- **Text part** — The `System:` section includes all 19 CAR-bench policies the agent must follow (e.g., check weather before opening sunroof, validate addresses). The `User:` section is the initial user request (e.g., "Navigate to Munich city center").
 
-- **DataPart** — A dictionary with a `"tools"` key containing a list of tool definitions. Each tool follows the OpenAI function calling format:
+- **Data part** — A dictionary with a `"tools"` key containing a list of tool definitions. Each tool follows the OpenAI function calling format:
   ```json
   {
     "type": "function",
@@ -96,7 +107,7 @@ After the first turn, each message usually contains one Part. The content depend
 
 #### Alternative A: Tool Execution Results
 
-If your agent called tools in its previous response, the evaluator executes them against the CAR-bench environment and returns the results as a **`DataPart`** with structured tool results:
+If your agent called tools in its previous response, the evaluator executes them against the CAR-bench environment and returns the results as a **data Part** with structured tool results:
 
 ```json
 {
@@ -146,7 +157,7 @@ or:
 
 `source = "user"` means the parts contain an initial request or simulated user
 follow-up. `source = "environment"` means the parts contain tool execution
-results. Agents should still parse the `TextPart` and `DataPart` contents
+results. Agents should still parse the text and data Part contents
 directly; the metadata is an optional convenience tag for harnesses that want to
 route user turns and tool-result turns differently. The shared constants live in
 [`src/turn_metrics.py`](../src/turn_metrics.py) as `SOURCE_KEY`,
@@ -158,25 +169,24 @@ route user turns and tool-result turns differently. The shared constants live in
 
 Your agent sends its response as an A2A agent `Message` containing one or more
 parts. The reference agents use `new_message(...)` plus `new_text_part(...)`
-and `new_data_part(...)` from `a2a.helpers.proto_helpers`. There are several
+and `new_data_part(...)` from `a2a.helpers.proto_helpers`. These helpers return
+protobuf `Part` objects with the `text` or `data` field set. There are several
 valid response shapes:
 
 ### Option 1: Text Response Only
 
-Return a single `TextPart` with your response text. Use this when your agent is responding directly to the user without needing to call any tools.
+Return a single text Part with your response text. Use this when your agent is responding directly to the user without needing to call any tools.
 
-See the baseline agent's `execute()` method — when the LLM returns content but no tool calls, it creates a `TextPart` with the content text.
+See the baseline agent's `execute()` method — when the LLM returns content but no tool calls, it calls `new_text_part(...)` with the content text.
 
 ### Option 2: Tool Call(s) Only
 
-Return a single `DataPart` containing the tool calls. The reference agents use
+Return a single data Part containing the tool calls. The reference agents use
 the `ToolCallsData` model in
-[`src/agent_under_test/tool_call_types.py`](../src/agent_under_test/tool_call_types.py)
-or
-[`src/agent_under_test_codex/tool_call_types.py`](../src/agent_under_test_codex/tool_call_types.py)
+[`src/tool_call_types.py`](../src/tool_call_types.py)
 to structure the data:
 
-The DataPart's `data` field should be the `.model_dump()` of a `ToolCallsData` instance, which produces:
+The data Part's `data` field should be the `.model_dump()` of a `ToolCallsData` instance, which produces:
 ```json
 {
   "tool_calls": [
@@ -190,7 +200,7 @@ You can call **multiple tools** in a single response by adding multiple `ToolCal
 
 ### Option 3: Text + Tool Call(s)
 
-Return both a `TextPart` and a `DataPart`. The text serves as a natural language explanation of what the agent is doing, while the DataPart contains the actual tool calls.
+Return both a text Part and a data Part. The text serves as a natural language explanation of what the agent is doing, while the data Part contains the actual tool calls.
 
 This is the most common pattern in the baseline agent; see
 [`src/agent_under_test/car_bench_agent.py`](../src/agent_under_test/car_bench_agent.py)
@@ -200,16 +210,16 @@ drive the next turn.
 
 ### Optional: Reasoning Content
 
-If your LLM produces reasoning/thinking output (e.g., Claude extended thinking), you can include it as an additional `DataPart` with `{"reasoning_content": "..."}`. The evaluator will capture it for debugging but it doesn't affect evaluation.
+If your LLM produces reasoning/thinking output (e.g., Claude extended thinking), you can include it as an additional data Part with `{"reasoning_content": "..."}`. The evaluator will capture it for debugging but it doesn't affect evaluation.
 
 ### Message Parts vs Metadata
 
 The evaluator scores behavior from the response **message parts**, not from
 metadata. Put all benchmark-visible actions in parts:
 
-- User-facing text goes in `TextPart`.
-- Tool calls go in `DataPart({"tool_calls": [...]})`.
-- Optional debug reasoning goes in `DataPart({"reasoning_content": "..."})`.
+- User-facing text goes in a text Part.
+- Tool calls go in a data Part: `{"tool_calls": [...]}`.
+- Optional debug reasoning goes in a data Part: `{"reasoning_content": "..."}`.
 
 Do not put tool calls, hidden observations, private plans, or final answers in
 `Message.metadata`. The evaluator ignores metadata for behavior and uses it only
@@ -220,16 +230,16 @@ for run accounting such as latency and token/cost metrics.
 ## Conversation Lifecycle
 
 ```
-Turn 1:  Evaluator → Agent Under Test:  TextPart(System + User) + DataPart(tools)
-         Agent Under Test → Evaluator:  TextPart(text) + DataPart(tool_calls)
+Turn 1:  Evaluator → Agent Under Test:  text Part(System + User) + data Part(tools)
+         Agent Under Test → Evaluator:  text Part(text) + data Part(tool_calls)
 
-Turn 2:  Evaluator → Agent Under Test:  DataPart(tool results)
-         Agent Under Test → Evaluator:  TextPart(text) + DataPart(tool_calls)
+Turn 2:  Evaluator → Agent Under Test:  data Part(tool results)
+         Agent Under Test → Evaluator:  text Part(text) + data Part(tool_calls)
 
-Turn 3:  Evaluator → Agent Under Test:  DataPart(tool results)
-         Agent Under Test → Evaluator:  TextPart(final answer)      ← no tool calls = done
+Turn 3:  Evaluator → Agent Under Test:  data Part(tool results)
+         Agent Under Test → Evaluator:  text Part(final answer)      ← no tool calls = done
 
-Turn 4:  Evaluator → Agent Under Test:  TextPart(next user utterance)
+Turn 4:  Evaluator → Agent Under Test:  text Part(next user utterance)
          Agent Under Test → Evaluator:  ...
 ```
 
@@ -276,7 +286,7 @@ decide task success.
 
 Attach `turn_metrics` only when the response is a final user-facing response for
 the current assistant step, meaning the response has **no** `tool_calls`
-DataPart. If your agent calls a tool, accumulate metrics internally and attach
+data Part. If your agent calls a tool, accumulate metrics internally and attach
 the aggregate metrics on the later response after the evaluator sends tool
 results back.
 
@@ -320,8 +330,8 @@ The reference agents conform to this contract:
 
 | Agent | Message Parts | Metadata |
 |-------|---------------|----------|
-| `src/agent_under_test/` | `TextPart`, `DataPart({"tool_calls": ...})`, optional `reasoning_content` | Aggregated LiteLLM usage on final no-tool-call responses |
-| `src/agent_under_test_codex/` | `TextPart` for `respond`, `DataPart({"tool_calls": ...})` for actions | Codex latency/call count plus app-server token usage when emitted; cost remains zero |
+| `src/agent_under_test/` | text Part, data Part with `{"tool_calls": ...}`, optional `reasoning_content` | Aggregated LiteLLM usage on final no-tool-call responses |
+| `src/agent_under_test_codex/` | text Part for `respond`, data Part with `{"tool_calls": ...}` for actions | Codex latency/call count plus app-server token usage when emitted; cost remains zero |
 | `src/agent_under_test_codex_planner/` | Same as Codex JSON agent | Planner plus executor call counts, combined model label, and aggregated app-server token usage |
 | `src/agent_under_test_codex_python/` | Same as Codex JSON agent after parsing Python-call DSL | Same as Codex JSON agent |
 
@@ -333,11 +343,18 @@ For shared constants, see [`src/turn_metrics.py`](../src/turn_metrics.py).
 
 Your agent needs an HTTP server to expose it via A2A. The server setup involves:
 
-1. **AgentCard** — Metadata describing your agent (name, skills, URL). See
+1. **AgentCard** — Metadata describing your agent (name, skills, supported interfaces). See
    `prepare_agent_card()` in the server files listed below.
 2. **RequestHandler** — Wraps your executor. Use `DefaultRequestHandler` from `a2a.server.request_handlers`.
-3. **A2AStarletteApplication** — The ASGI app. Takes the agent card and request handler.
-4. **uvicorn** — Runs the ASGI app.
+3. **A2A route helpers** — Build the JSON-RPC and well-known Agent Card routes with
+   `create_jsonrpc_routes(...)` and `create_agent_card_routes(...)` from `a2a.server.routes`.
+4. **Starlette** — Combines those routes into the ASGI app.
+5. **uvicorn** — Runs the ASGI app.
+
+The bundled reference servers enable `enable_v0_3_compat=True` on the route
+helpers only as a compatibility affordance. The primary path documented here is
+A2A 1.0: protobuf `Message` objects, protobuf `Part` oneofs, `SendMessage` /
+`SendStreamingMessage`, `supportedInterfaces`, and `A2A-Version: 1.0`.
 
 The server also accepts CLI arguments and environment variables for LLM
 configuration. The exact flags depend on the reference agent. For examples, see:
@@ -388,9 +405,9 @@ The system prompt in the first message includes all 19 CAR-bench policies. Your 
 You can perform prompt optimization on the system prompt, however the original policies are used for code-based and LLM-as-a-Judge evaluation (so changing the rules/logic will likely result in error).
 
 ### Tool Calling Format
-- Tools are provided in **OpenAI function calling format** (see DataPart in first message)
-- Return tool calls using the `ToolCallsData` shape from the reference
-  `tool_call_types.py` modules.
+- Tools are provided in **OpenAI function calling format** (see the data Part in first message)
+- Return tool calls using the shared `ToolCallsData` shape from
+  [`src/tool_call_types.py`](../src/tool_call_types.py).
 - Arguments must match the tool's parameter schema
 
 You can edit tool descriptions and parameter descriptions inside your own
@@ -405,7 +422,7 @@ execution metrics depend on the evaluator seeing the raw action your agent chose
 
 ### Error Handling
 - Handle missing or malformed message parts gracefully
-- Return error messages as `TextPart` if something fails
+- Return error messages as text Parts if something fails
 - The baseline agent has a fallback using `context.get_user_input()` if part parsing fails
 
 ### LLM Flexibility

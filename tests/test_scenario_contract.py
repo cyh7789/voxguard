@@ -14,6 +14,7 @@ from agentbeats.client_cli import (
 )
 from agentbeats.run_scenario import parse_toml as parse_runner_toml
 from generate_compose import (
+    compose_up_command,
     generate_a2a_scenario,
     generate_docker_compose,
     parse_scenario,
@@ -54,7 +55,17 @@ class ScenarioContractTest(unittest.TestCase):
         self.assertIn("agent-network:", compose)
         self.assertIn("context: ../..", compose)
         self.assertIn("../../output:/home/carbench/app/output", compose)
+        self.assertIn("docker compose --env-file .env", compose)
         self.assertNotIn("green-agent", compose)
+
+    def test_compose_up_command_uses_root_env_file(self) -> None:
+        command = compose_up_command(Path("scenarios/agent_under_test/docker-compose.yml"))
+
+        self.assertEqual(
+            command,
+            "docker compose --env-file .env -f "
+            "scenarios/agent_under_test/docker-compose.yml up --abort-on-container-exit",
+        )
 
     def test_generated_a2a_scenario_uses_singular_aut_contract(self) -> None:
         scenario = generate_a2a_scenario(self._scenario())
@@ -86,6 +97,29 @@ class ScenarioContractTest(unittest.TestCase):
         self.assertEqual(path.parts[0:2], ("output", "codex-planner"))
         self.assertIn("gpt-5.5_to_gpt-5.3-codex-spark", path.name)
         self.assertIn("medium", path.name)
+        self.assertIn("split-unspecified", path.name)
+
+    def test_output_path_omits_unreliable_user_model(self) -> None:
+        data = {
+            "evaluator": {"endpoint": "http://127.0.0.1:8081"},
+            "agent_under_test": {"endpoint": "http://127.0.0.1:8080"},
+            "config": {
+                "task_split": "test",
+                "num_trials": 1,
+                "user_model": "gemini/gemini-2.5-flash",
+                "tasks_base_num_tasks": 2,
+                "tasks_hallucination_num_tasks": 0,
+                "tasks_disambiguation_num_tasks": 0,
+            },
+        }
+
+        path = resolve_output_path("output", Path("scenarios/custom/smoke.toml"), data)
+
+        self.assertIsNotNone(path)
+        self.assertIn("test-trials1-base2-hall0-dis0", path.name)
+        self.assertNotIn("gemini", path.name)
+        self.assertNotIn("model-unspecified", path.name)
+        self.assertNotIn("effort-unspecified", path.name)
 
     def test_output_payload_promotes_final_summary_and_metadata(self) -> None:
         req, evaluator_url = parse_client_toml(
@@ -126,6 +160,7 @@ class ScenarioContractTest(unittest.TestCase):
         self.assertEqual(payload["summary"], {"pass_rate": 50.0})
         self.assertEqual(payload["metadata"]["model"], "gemini/gemini-2.5-flash")
         self.assertEqual(payload["metadata"]["reasoning_effort"], "low")
+        self.assertEqual(payload["metadata"]["task_selection"], "split-unspecified-trials1")
         self.assertEqual(payload["metadata"]["wall_time_seconds"], 60.0)
 
     def test_client_cli_parses_new_shape(self) -> None:

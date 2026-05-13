@@ -196,7 +196,16 @@ def _agent_metadata(data: dict[str, Any]) -> dict[str, Any]:
                 metadata[key] = agent[key]
         for key, value in agent.get("env", {}).items():
             upper = key.upper()
-            if "MODEL" in upper or "LLM" in upper or "REASONING" in upper:
+            if upper in {
+                "AGENT_LLM",
+                "AGENT_REASONING_EFFORT",
+                "CODEX_MODEL",
+                "CODEX_REASONING_EFFORT",
+                "CODEX_PLANNER_MODEL",
+                "CODEX_EXECUTOR_MODEL",
+                "CODEX_PLANNER_REASONING_EFFORT",
+                "CODEX_EXECUTOR_REASONING_EFFORT",
+            }:
                 metadata[key] = value
         if "command_args" in agent:
             metadata["command_args"] = agent["command_args"]
@@ -219,18 +228,28 @@ def _metadata_command_args(metadata: dict[str, Any]) -> list[str]:
     return [str(arg) for arg in command_args]
 
 
-def _model_label(metadata: dict[str, Any]) -> str:
-    if metadata.get("result_model"):
-        return str(metadata["result_model"])
+def _normalize_label(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = _expand_shell_default(str(value)).strip()
+    if not text or text.startswith("${"):
+        return None
+    return text
 
-    planner = metadata.get("CODEX_PLANNER_MODEL")
-    executor = metadata.get("CODEX_EXECUTOR_MODEL")
+
+def _model_label(metadata: dict[str, Any]) -> str | None:
+    if metadata.get("result_model"):
+        return _normalize_label(metadata["result_model"])
+
+    planner = _normalize_label(metadata.get("CODEX_PLANNER_MODEL"))
+    executor = _normalize_label(metadata.get("CODEX_EXECUTOR_MODEL"))
     if planner and executor:
         return f"{planner}_to_{executor}"
 
-    for key in ("CODEX_EXECUTOR_MODEL", "CODEX_MODEL", "AGENT_LLM", "MODEL", "LLM_MODEL"):
-        if metadata.get(key):
-            return str(metadata[key])
+    for key in ("CODEX_EXECUTOR_MODEL", "CODEX_MODEL", "AGENT_LLM"):
+        value = _normalize_label(metadata.get(key))
+        if value:
+            return value
 
     args = _metadata_command_args(metadata)
     for names in (
@@ -242,27 +261,27 @@ def _model_label(metadata: dict[str, Any]) -> str:
         value = _command_arg_value(args, *names)
         if value:
             return value
-    return "model-unspecified"
+    return None
 
 
-def _reasoning_label(metadata: dict[str, Any]) -> str:
+def _reasoning_label(metadata: dict[str, Any]) -> str | None:
     if metadata.get("result_reasoning_effort"):
-        return str(metadata["result_reasoning_effort"])
+        return _normalize_label(metadata["result_reasoning_effort"])
 
-    planner = metadata.get("CODEX_PLANNER_REASONING_EFFORT")
-    executor = metadata.get("CODEX_EXECUTOR_REASONING_EFFORT")
+    planner = _normalize_label(metadata.get("CODEX_PLANNER_REASONING_EFFORT"))
+    executor = _normalize_label(metadata.get("CODEX_EXECUTOR_REASONING_EFFORT"))
     if planner and executor and planner != executor:
         return f"{planner}_to_{executor}"
     if executor:
-        return str(executor)
+        return executor
 
     for key in (
         "CODEX_REASONING_EFFORT",
         "AGENT_REASONING_EFFORT",
-        "REASONING_EFFORT",
     ):
-        if metadata.get(key):
-            return str(metadata[key])
+        value = _normalize_label(metadata.get(key))
+        if value:
+            return value
 
     args = _metadata_command_args(metadata)
     for names in (
@@ -273,10 +292,51 @@ def _reasoning_label(metadata: dict[str, Any]) -> str:
         value = _command_arg_value(args, *names)
         if value:
             return value
-    return "effort-unspecified"
+    return None
 
 
-def resolve_output_path(output_arg: str | None, scenario_path: Path, data: dict[str, Any]) -> Path | None:
+def task_selection_label(config: dict[str, Any], final_result: dict[str, Any] | None = None) -> str:
+    """Build a compact task/trial label for result filenames."""
+    parts = [str(config.get("task_split", "split-unspecified"))]
+    if "num_trials" in config:
+        parts.append(f"trials{config['num_trials']}")
+
+    split_abbreviations = {
+        "base": "base",
+        "hallucination": "hall",
+        "disambiguation": "dis",
+    }
+    summary = final_result.get("summary", {}) if isinstance(final_result, dict) else {}
+    actual_splits = summary.get("splits", {}) if isinstance(summary, dict) else {}
+
+    for split, abbreviation in split_abbreviations.items():
+        actual = actual_splits.get(split, {}) if isinstance(actual_splits, dict) else {}
+        if isinstance(actual, dict) and "num_unique_tasks" in actual:
+            parts.append(f"{abbreviation}{actual['num_unique_tasks']}")
+            continue
+
+        filter_key = f"tasks_{split}_task_id_filter"
+        num_key = f"tasks_{split}_num_tasks"
+        if filter_key in config and config[filter_key] is not None:
+            value = config[filter_key]
+            count = len(value) if isinstance(value, list) else 1
+            parts.append(f"{abbreviation}{count}ids")
+        elif num_key in config:
+            value = config[num_key]
+            parts.append(f"{abbreviation}{'all' if value == -1 else value}")
+
+    if isinstance(summary, dict) and summary.get("num_results") is not None:
+        parts.append(f"runs{summary['num_results']}")
+
+    return "-".join(str(part) for part in parts)
+
+
+def resolve_output_path(
+    output_arg: str | None,
+    scenario_path: Path,
+    data: dict[str, Any],
+    final_result: dict[str, Any] | None = None,
+) -> Path | None:
     if not output_arg:
         return None
 
@@ -287,10 +347,18 @@ def resolve_output_path(output_arg: str | None, scenario_path: Path, data: dict[
     metadata = _agent_metadata(data)
     agent_slug = _slug(_agent_name(scenario_path, data), default="agent_under_test")
     scenario_slug = _slug(_scenario_name(scenario_path, data), default="scenario")
-    model_slug = _slug(_model_label(metadata), default="model-unspecified")
-    effort_slug = _slug(_reasoning_label(metadata), default="effort-unspecified")
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    filename = f"{timestamp}__{scenario_slug}__{model_slug}__{effort_slug}.json"
+    filename_parts = [
+        datetime.now().strftime("%Y%m%d-%H%M%S"),
+        scenario_slug,
+        _slug(task_selection_label(data.get("config", {}) or {}, final_result), default="tasks"),
+    ]
+    model_label = _model_label(metadata)
+    reasoning_label = _reasoning_label(metadata)
+    if model_label:
+        filename_parts.append(_slug(model_label, default="model"))
+    if reasoning_label:
+        filename_parts.append(_slug(reasoning_label, default="reasoning"))
+    filename = "__".join(filename_parts) + ".json"
     return output_path / agent_slug / filename
 
 
@@ -311,6 +379,8 @@ def build_output_payload(
     ]
     final_result, final_summary = _find_final_result(artifact_records)
     metadata = _agent_metadata(scenario_data)
+    model_label = _model_label(metadata)
+    reasoning_label = _reasoning_label(metadata)
 
     return {
         "metadata": {
@@ -323,8 +393,12 @@ def build_output_payload(
             "agent_name": _agent_name(scenario_path, scenario_data),
             "agent_under_test": str(req.agent_under_test),
             "evaluator": evaluator_url,
-            "model": _expand_shell_default(_model_label(metadata)),
-            "reasoning_effort": _expand_shell_default(_reasoning_label(metadata)),
+            "model": model_label,
+            "reasoning_effort": reasoning_label,
+            "task_selection": task_selection_label(
+                scenario_data.get("config", {}) or {},
+                final_result,
+            ),
             "agent_metadata": metadata,
             "config": scenario_data.get("config", {}),
         },
@@ -449,7 +523,7 @@ async def main():
     final_result, final_summary = _find_final_result(artifact_records)
     print_final_summary(final_result, final_summary)
 
-    output_path = resolve_output_path(output_arg, scenario_path, data)
+    output_path = resolve_output_path(output_arg, scenario_path, data, final_result)
     if output_path:
         output_data = build_output_payload(
             req=req,

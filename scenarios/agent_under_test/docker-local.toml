@@ -5,8 +5,7 @@
 #   1. Build your Docker images locally or use published images
 #   2. cp .env.example .env  # Edit with your API keys
 #   3. uv run python generate_compose.py --scenario scenarios/agent_under_test/docker-local.toml
-#   4. mkdir -p output
-#   5. docker compose up --abort-on-container-exit
+#   4. docker compose --env-file .env -f scenarios/agent_under_test/docker-compose.yml up --abort-on-container-exit
 
 [evaluator]
 # For local testing, use 'build' to build from local Dockerfile

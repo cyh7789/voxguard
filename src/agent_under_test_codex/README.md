@@ -6,9 +6,10 @@ assistant decision layer to Codex app-server.
 
 ## Design Choices
 
-- **A2A stays the public interface.** The evaluator sends `TextPart` and `DataPart`
-  messages, and this agent returns either a user-facing `TextPart` or a
-  `DataPart` with `{"tool_calls": [...]}`.
+- **A2A stays the public interface.** The evaluator sends text and data Parts,
+  and this agent returns either a user-facing text Part or a data Part with
+  `{"tool_calls": [...]}`. In A2A SDK 1.0 these are protobuf `Part` objects,
+  usually created with `new_text_part(...)` and `new_data_part(...)`.
 - **CAR-bench remains the evaluator.** The agent does not execute vehicle tools.
   It only decides the next response/tool call and lets the evaluator run tools, simulate
   the user, and score rewards.
@@ -94,12 +95,14 @@ authenticated Codex home:
 
 ```bash
 uv run python generate_compose.py --scenario scenarios/agent_under_test_codex/docker-local.toml
-mkdir -p output
-docker compose up --abort-on-container-exit
+docker compose --env-file .env -f scenarios/agent_under_test_codex/docker-compose.yml up --abort-on-container-exit
 ```
 
 Set `CODEX_HOME_HOST` in `.env` to an absolute host path containing Codex auth,
 for example `/Users/alice/.codex`.
+Prefer creating a dedicated benchmark home with
+`CODEX_HOME="$HOME/.codex-car-bench" codex login` instead of mounting your
+everyday Codex desktop/app state.
 
 To intentionally test a newer or older CLI in Docker, override the build arg:
 

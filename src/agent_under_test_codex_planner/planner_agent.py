@@ -3,7 +3,7 @@
 The planner call emits a private ``planning_tool``-shaped object. It is used as
 internal reasoning only and is never returned to the evaluator as a CAR-bench tool call.
 The evaluator still receives exactly one benchmark-compatible text response or tool-call
-DataPart from the Spark executor.
+data Part from the Spark executor.
 """
 
 from __future__ import annotations

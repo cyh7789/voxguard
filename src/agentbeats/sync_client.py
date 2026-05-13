@@ -6,8 +6,7 @@ import json
 from uuid import uuid4
 
 import httpx
-from a2a.types import Message, Part, Role, Task
-from a2a.helpers.proto_helpers import new_text_part, new_data_part
+from a2a.types import Message, Role, Task
 from google.protobuf.json_format import MessageToDict, ParseDict
 
 
@@ -49,6 +48,22 @@ def merge_parts(parts) -> str:
     return "\n".join(chunks)
 
 
+def build_send_message_jsonrpc_request(message: Message) -> dict:
+    """Build an A2A 1.0 JSON-RPC SendMessage request.
+
+    Use protobuf's default JSON mapping so public field names are lowerCamelCase
+    (`messageId`, `contextId`, etc.), matching the SDK's own JSON-RPC transport.
+    """
+    return {
+        "jsonrpc": "2.0",
+        "id": uuid4().hex,
+        "method": "SendMessage",
+        "params": {
+            "message": MessageToDict(message),
+        },
+    }
+
+
 def send_message_with_parts_sync(parts: list, base_url: str, context_id: str | None = None, task_id: str | None = None, metadata: dict | None = None) -> dict:
     """Send a message with custom parts synchronously. Safe for use in thread pools.
 
@@ -56,19 +71,7 @@ def send_message_with_parts_sync(parts: list, base_url: str, context_id: str | N
     """
     # Create the protobuf message
     outbound_msg = create_message_with_parts(parts=parts, context_id=context_id, task_id=task_id, metadata=metadata)
-
-    # Serialize to v1.0 JSON format
-    msg_dict = MessageToDict(outbound_msg, preserving_proto_field_name=True)
-
-    # Prepare JSON-RPC 2.0 request with v1.0 method name
-    jsonrpc_request = {
-        "jsonrpc": "2.0",
-        "id": uuid4().hex,
-        "method": "SendMessage",
-        "params": {
-            "message": msg_dict
-        }
-    }
+    jsonrpc_request = build_send_message_jsonrpc_request(outbound_msg)
 
     # Use synchronous httpx client
     with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:

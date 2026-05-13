@@ -3,7 +3,7 @@ CAR-bench Codex agent under test.
 
 This agent uses Codex subscription-backed next-action inference while keeping
 the same A2A surface: evaluator sends policy/user/tool-result Parts; the agent
-under test returns TextPart responses or DataPart tool calls.
+under test returns text Part responses or data Part tool calls.
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ from turn_metrics import (
     THINKING_TOKENS,
     TURN_METRICS_KEY,
 )
+from tool_call_types import ToolCall, ToolCallsData
 sys.path.pop(0)
 
 if __package__:
@@ -45,7 +46,6 @@ if __package__:
         CodexTokenUsage,
         add_token_usage,
     )
-    from .tool_call_types import ToolCall, ToolCallsData
 else:
     from codex_client import (
         CodexAppServerClient,
@@ -54,8 +54,6 @@ else:
         CodexTokenUsage,
         add_token_usage,
     )
-    from tool_call_types import ToolCall, ToolCallsData
-
 
 logger = configure_logger(role="agent_under_test", context="-")
 

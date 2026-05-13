@@ -31,6 +31,8 @@ DEFAULT_PORT = 9009
 DEFAULT_ENV_VARS = {"PYTHONUNBUFFERED": "1"}
 
 COMPOSE_TEMPLATE = """# Auto-generated from scenario.toml
+# Run from the repository root with:
+# docker compose --env-file .env -f {compose_path} up --abort-on-container-exit
 
 services:
   evaluator:{evaluator_build_or_image}
@@ -224,6 +226,7 @@ def generate_docker_compose(
     results_dir = results_dir or Path(RESULTS_DIR)
 
     return COMPOSE_TEMPLATE.format(
+        compose_path=str(output_dir / COMPOSE_FILENAME),
         evaluator_build_or_image=format_build_or_image(evaluator, output_dir),
         agent_under_test_build_or_image=format_build_or_image(agent_under_test, output_dir),
         port=DEFAULT_PORT,
@@ -293,18 +296,27 @@ def collect_agent_metadata(agent: dict[str, Any]) -> dict[str, Any]:
 
     for key, value in agent.get("env", {}).items():
         upper = key.upper()
-        if (
-            "MODEL" in upper
-            or "LLM" in upper
-            or "REASONING" in upper
-            or upper in {"TEMPERATURE"}
-        ):
+        if upper in {
+            "AGENT_LLM",
+            "AGENT_REASONING_EFFORT",
+            "CODEX_MODEL",
+            "CODEX_REASONING_EFFORT",
+            "CODEX_PLANNER_MODEL",
+            "CODEX_EXECUTOR_MODEL",
+            "CODEX_PLANNER_REASONING_EFFORT",
+            "CODEX_EXECUTOR_REASONING_EFFORT",
+        }:
             metadata[key] = value
 
     if "command_args" in agent:
         metadata["command_args"] = agent["command_args"]
 
     return metadata
+
+
+def compose_up_command(compose_path: Path, env_path: str = ENV_PATH) -> str:
+    """Return the recommended Compose command for generated scenario-local files."""
+    return f"docker compose --env-file {env_path} -f {compose_path} up --abort-on-container-exit"
 
 
 def generate_env_file(scenario: dict[str, Any]) -> str:
@@ -387,7 +399,7 @@ def main():
     print(f"✓ Generated {compose_path} and {a2a_scenario_path}")
     print(f"\nNext steps:")
     print(f"  1. Review/edit .env file with your API keys")
-    print(f"  2. docker compose -f {compose_path} up --abort-on-container-exit")
+    print(f"  2. {compose_up_command(compose_path)}")
     print(f"  3. Check {args.results_dir}/{_agent_name(scenario)}/ for timestamped results")
 
 
