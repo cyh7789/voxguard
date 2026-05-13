@@ -18,6 +18,12 @@ jobs:
           # CAR-bench agents
           - name: car-bench-agent
             dockerfile: src/purple_car_bench_agent/Dockerfile.car-bench-agent
+          - name: car-bench-agent-codex
+            dockerfile: src/purple_car_bench_agent_codex/Dockerfile.car-bench-agent-codex
+          - name: car-bench-agent-codex-planner
+            dockerfile: src/purple_car_bench_agent_codex_planner/Dockerfile.car-bench-agent-codex-planner
+          - name: car-bench-agent-codex-python
+            dockerfile: src/purple_car_bench_agent_codex_python/Dockerfile.car-bench-agent-codex-python
           - name: car-bench-evaluator
             dockerfile: src/green_car_bench_agent/Dockerfile.car-bench-evaluator
 
@@ -36,7 +42,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: CAR-bench/car-bench
-          path: scenarios/car-bench/car-bench
+          path: third_party/car-bench
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3

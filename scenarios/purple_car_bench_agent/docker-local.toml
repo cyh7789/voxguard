@@ -4,7 +4,7 @@
 # Usage:
 #   1. Build your Docker images locally or use published images
 #   2. cp .env.example .env  # Edit with your API keys
-#   3. uv run python generate_compose.py --scenario scenarios/scenario-docker-local.toml
+#   3. uv run python generate_compose.py --scenario scenarios/purple_car_bench_agent/docker-local.toml
 #   4. mkdir -p output
 #   5. docker compose up --abort-on-container-exit
 
@@ -12,9 +12,9 @@
 # For local testing, use 'build' to build from local Dockerfile
 build = { context = ".", dockerfile = "src/green_car_bench_agent/Dockerfile.car-bench-evaluator" }
 # Environment variables for the green agent
-env = { GEMINI_API_KEY = "${GEMINI_API_KEY}", LOGURU_LEVEL = "${LOGURU_LEVEL}", CAR_BENCH_DATA_DIR = "/workspace/scenarios/car-bench/car-bench/car_bench/envs/car_voice_assistant/mock_data" }
+env = { GEMINI_API_KEY = "${GEMINI_API_KEY}", LOGURU_LEVEL = "${LOGURU_LEVEL}", CAR_BENCH_DATA_DIR = "/workspace/third_party/car-bench/car_bench/envs/car_voice_assistant/mock_data" }
 # Mount the data directory into the container
-volumes = ["./scenarios/car-bench/car-bench:/workspace/scenarios/car-bench/car-bench:ro"]
+volumes = ["./third_party/car-bench:/workspace/third_party/car-bench:ro"]
 
 [[participants]]
 # For local testing, use 'build' to build from local Dockerfile

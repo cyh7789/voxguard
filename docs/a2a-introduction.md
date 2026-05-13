@@ -1,6 +1,6 @@
 # A2A Protocol Introduction
 
-> **Presentation companion document** — Use this alongside the codebase to walk through the A2A protocol with live code examples.
+> **Background document** — Use this alongside the codebase to walk through the A2A protocol with live code examples.
 >
 > 📐 **Spec reference:** [A2A Protocol Specification (RC v1.0)](https://a2a-protocol.org/latest/specification/) — released under the Linux Foundation, contributed by Google.
 

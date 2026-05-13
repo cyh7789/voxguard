@@ -8,9 +8,9 @@ to use the exact same internal inference strategy.
 
 | Agent | Package | Local Scenario | Internal Strategy |
 |-------|---------|----------------|-------------------|
-| Codex JSON agent | [`src/purple_car_bench_agent_codex/`](../src/purple_car_bench_agent_codex/) | [`scenarios/scenario-test-codex.toml`](../scenarios/scenario-test-codex.toml) | Spark returns schema-constrained next-action JSON. |
-| Codex planner/executor | [`src/purple_car_bench_agent_codex_planner/`](../src/purple_car_bench_agent_codex_planner/) | [`scenarios/scenario-test-codex-planner.toml`](../scenarios/scenario-test-codex-planner.toml) | Larger planner runs once after a user message; Spark executor reuses the private plan across tool-result turns. |
-| Codex Python-call DSL | [`src/purple_car_bench_agent_codex_python/`](../src/purple_car_bench_agent_codex_python/) | [`scenarios/scenario-test-codex-python.toml`](../scenarios/scenario-test-codex-python.toml) | Spark emits a fenced Python-call action block that is parsed, never executed. |
+| Codex JSON agent | [`src/purple_car_bench_agent_codex/`](../src/purple_car_bench_agent_codex/) | [`scenarios/purple_car_bench_agent_codex/smoke.toml`](../scenarios/purple_car_bench_agent_codex/smoke.toml) | Spark returns schema-constrained next-action JSON. |
+| Codex planner/executor | [`src/purple_car_bench_agent_codex_planner/`](../src/purple_car_bench_agent_codex_planner/) | [`scenarios/purple_car_bench_agent_codex_planner/smoke.toml`](../scenarios/purple_car_bench_agent_codex_planner/smoke.toml) | Larger planner runs once after a user message; Spark executor reuses the private plan across tool-result turns. |
+| Codex Python-call DSL | [`src/purple_car_bench_agent_codex_python/`](../src/purple_car_bench_agent_codex_python/) | [`scenarios/purple_car_bench_agent_codex_python/smoke.toml`](../scenarios/purple_car_bench_agent_codex_python/smoke.toml) | Spark emits a fenced Python-call action block that is parsed, never executed. |
 
 ## Model Selection
 
@@ -29,10 +29,10 @@ total harness still fits the time budget.
 Ways to change the model:
 
 - Local run: edit `CODEX_MODEL` in `.env`.
-- Docker local build: edit `CODEX_MODEL` in `.env`; `scenario-docker-codex.toml`
+- Docker local build: edit `CODEX_MODEL` in `.env`; `scenarios/purple_car_bench_agent_codex/docker-local.toml`
   forwards it into the container.
 - Scenario-specific local run: add `--model <model-id>` to the participant
-  command in `scenario-test-codex.toml`.
+  command in `scenarios/purple_car_bench_agent_codex/smoke.toml`.
 - Code-level advanced harness: pass `model=` to `CodexAppServerClient.generate`
   for individual internal calls.
 
@@ -117,7 +117,7 @@ primitive as long as it only uses benchmark-visible inputs.
 Run it locally with:
 
 ```bash
-uv run agentbeats-run scenarios/scenario-test-codex-planner.toml --show-logs
+uv run agentbeats-run scenarios/purple_car_bench_agent_codex_planner/smoke.toml --show-logs
 ```
 
 ```python
@@ -317,7 +317,7 @@ code block is closer to how Codex naturally proposes small pieces of code.
 Run it locally with:
 
 ```bash
-uv run agentbeats-run scenarios/scenario-test-codex-python.toml --show-logs
+uv run agentbeats-run scenarios/purple_car_bench_agent_codex_python/smoke.toml --show-logs
 ```
 
 Accepted examples:

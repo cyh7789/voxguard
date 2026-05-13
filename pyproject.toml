@@ -44,7 +44,7 @@ dev = [
 package = true
 
 [tool.uv.sources]
-car-bench = { path = "scenarios/car-bench/car-bench" }
+car-bench = { path = "third_party/car-bench" }
 
 [tool.hatch.metadata]
 allow-direct-references = true

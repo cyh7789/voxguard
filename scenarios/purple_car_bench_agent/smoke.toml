@@ -1,3 +1,5 @@
+# Quick local smoke scenario for the baseline LiteLLM purple agent.
+
 [green_agent]
 endpoint = "http://127.0.0.1:8081"
 cmd = "python src/green_car_bench_agent/server.py --host 127.0.0.1 --port 8081"

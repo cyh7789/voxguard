@@ -55,13 +55,13 @@ is closer to Codex's natural code-proposal behavior.
 ## Local Run
 
 ```bash
-uv run agentbeats-run scenarios/scenario-test-codex-python.toml --show-logs
+uv run agentbeats-run scenarios/purple_car_bench_agent_codex_python/smoke.toml --show-logs
 ```
 
 ## Docker Run
 
 ```bash
-uv run python generate_compose.py --scenario scenarios/scenario-docker-codex-python.toml
+uv run python generate_compose.py --scenario scenarios/purple_car_bench_agent_codex_python/docker-local.toml
 mkdir -p output
 docker compose up --abort-on-container-exit
 ```

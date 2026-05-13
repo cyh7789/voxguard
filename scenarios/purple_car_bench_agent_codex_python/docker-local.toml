@@ -3,14 +3,14 @@
 # Before running:
 #   1. Authenticate Codex on the host.
 #   2. Set CODEX_HOME_HOST in .env to the absolute authenticated Codex home.
-#   3. uv run python generate_compose.py --scenario scenarios/scenario-docker-codex-python.toml
+#   3. uv run python generate_compose.py --scenario scenarios/purple_car_bench_agent_codex_python/docker-local.toml
 #   4. mkdir -p output
 #   5. docker compose up --abort-on-container-exit
 
 [green_agent]
 build = { context = ".", dockerfile = "src/green_car_bench_agent/Dockerfile.car-bench-evaluator" }
-env = { GEMINI_API_KEY = "${GEMINI_API_KEY:?Set GEMINI_API_KEY in .env}", LOGURU_LEVEL = "${LOGURU_LEVEL:-INFO}", CAR_BENCH_DATA_DIR = "/workspace/scenarios/car-bench/car-bench/car_bench/envs/car_voice_assistant/mock_data" }
-volumes = ["./scenarios/car-bench/car-bench:/workspace/scenarios/car-bench/car-bench:ro"]
+env = { GEMINI_API_KEY = "${GEMINI_API_KEY:?Set GEMINI_API_KEY in .env}", LOGURU_LEVEL = "${LOGURU_LEVEL:-INFO}", CAR_BENCH_DATA_DIR = "/workspace/third_party/car-bench/car_bench/envs/car_voice_assistant/mock_data" }
+volumes = ["./third_party/car-bench:/workspace/third_party/car-bench:ro"]
 
 [[participants]]
 build = { context = ".", dockerfile = "src/purple_car_bench_agent_codex_python/Dockerfile.car-bench-agent-codex-python" }

@@ -66,7 +66,7 @@ scenarios before accepting the update.
 ## Local Run
 
 ```bash
-uv run agentbeats-run scenarios/scenario-test-codex.toml --show-logs
+uv run agentbeats-run scenarios/purple_car_bench_agent_codex/smoke.toml --show-logs
 ```
 
 This expects Codex CLI to be available on `PATH` and already authenticated. You
@@ -87,7 +87,7 @@ Build the Codex purple image with the included Dockerfile, then mount a writable
 authenticated Codex home:
 
 ```bash
-uv run python generate_compose.py --scenario scenarios/scenario-docker-codex.toml
+uv run python generate_compose.py --scenario scenarios/purple_car_bench_agent_codex/docker-local.toml
 mkdir -p output
 docker compose up --abort-on-container-exit
 ```
@@ -102,6 +102,10 @@ docker build \
   --build-arg CODEX_NPM_PACKAGE='@openai/codex@0.130.0' \
   -f src/purple_car_bench_agent_codex/Dockerfile.car-bench-agent-codex .
 ```
+
+The Dockerfile installs Codex in a Node build stage and recreates the runtime
+`codex` launcher as a symlink into that global package so npm-managed optional
+dependencies resolve normally.
 
 ## Extending The Harness
 

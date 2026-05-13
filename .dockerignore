@@ -5,7 +5,8 @@
 **/__pycache__
 **/*.pyc
 
-# Include scenarios but exclude nested git repos and build artifacts
-scenarios/car-bench/car-bench/.git
-scenarios/car-bench/car-bench/results
-scenarios/car-bench/car-bench/**/*.egg-info
+# Include the green evaluator's local CAR-bench dependency, but exclude nested
+# git metadata and generated artifacts.
+third_party/car-bench/.git
+third_party/car-bench/results
+third_party/car-bench/**/*.egg-info

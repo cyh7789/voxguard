@@ -229,7 +229,7 @@ The server also accepts CLI arguments and environment variables for LLM configur
    python server.py --host localhost --port 8080 --agent-llm "gemini/gemini-2.5-flash"
    ```
 
-2. **Configure the scenario** (`scenarios/scenario.toml`):
+2. **Configure the scenario** (`scenarios/purple_car_bench_agent/local.toml`):
    ```toml
    [[participants]]
    name = "agent"
@@ -239,7 +239,7 @@ The server also accepts CLI arguments and environment variables for LLM configur
 
 3. **Run evaluation** (in another terminal):
    ```bash
-   uv run agentbeats-run scenarios/scenario.toml --show-logs
+   uv run agentbeats-run scenarios/purple_car_bench_agent/local.toml --show-logs
    ```
 
 4. **Check results** — The green agent will report per-task pass/fail and overall metrics.

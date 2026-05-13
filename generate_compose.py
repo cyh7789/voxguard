@@ -61,7 +61,6 @@ COMPOSE_TEMPLATE = """# Auto-generated from scenario.toml
 services:
   green-agent:{green_build_or_image}
     platform: linux/amd64
-    container_name: green-agent
     command: {green_command}
     environment:{green_env}{green_volumes}
     healthcheck:
@@ -75,13 +74,14 @@ services:
       - agent-network
 
 {participant_services}
-  agentbeats-client:
-    image: ghcr.io/agentbeats/agentbeats-client:v1.0.0
+  a2a-client:
+    build:
+      context: .
+      dockerfile: src/agentbeats/Dockerfile.agentbeats-client
     platform: linux/amd64
-    container_name: agentbeats-client
     volumes:
-      - ./a2a-scenario.toml:/app/scenario.toml
-      - ./output:/app/output
+      - ./a2a-scenario.toml:/home/agentbeats/app/scenario.toml
+      - ./output:/home/agentbeats/app/output
     command: ["scenario.toml", "output/results.json"]
     depends_on:{client_depends}
     networks:
@@ -94,7 +94,6 @@ networks:
 
 PARTICIPANT_TEMPLATE = """  {name}:{build_or_image}
     platform: linux/amd64
-    container_name: {name}
     command: {command}
     environment:{env}{volumes}
     healthcheck:

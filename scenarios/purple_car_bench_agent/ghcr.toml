@@ -4,7 +4,7 @@
 # Usage:
 #   1. Ensure images are published to ghcr.io
 #   2. cp .env.example .env  # Edit with your API keys
-#   3. uv run python generate_compose.py --scenario scenarios/scenario-ghcr.toml
+#   3. uv run python generate_compose.py --scenario scenarios/purple_car_bench_agent/ghcr.toml
 #   4. mkdir -p output
 #   5. docker compose up --abort-on-container-exit
 

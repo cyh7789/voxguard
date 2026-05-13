@@ -44,13 +44,13 @@ may still return `planning_tool` as a normal benchmark-visible tool call.
 ## Local Run
 
 ```bash
-uv run agentbeats-run scenarios/scenario-test-codex-planner.toml --show-logs
+uv run agentbeats-run scenarios/purple_car_bench_agent_codex_planner/smoke.toml --show-logs
 ```
 
 ## Docker Run
 
 ```bash
-uv run python generate_compose.py --scenario scenarios/scenario-docker-codex-planner.toml
+uv run python generate_compose.py --scenario scenarios/purple_car_bench_agent_codex_planner/docker-local.toml
 mkdir -p output
 docker compose up --abort-on-container-exit
 ```

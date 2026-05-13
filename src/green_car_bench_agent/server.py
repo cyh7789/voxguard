@@ -24,6 +24,7 @@ from a2a.server.routes import create_jsonrpc_routes, create_agent_card_routes
 from a2a.types import AgentCard
 
 from agentbeats.green_executor import GreenExecutor
+from car_bench_paths import CAR_BENCH_DATA_DIR, SETUP_SCRIPT
 from car_bench_evaluator import CARBenchEvaluator
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -76,16 +77,13 @@ async def main():
 
     # Auto-configure CAR_BENCH_DATA_DIR if not set
     if "CAR_BENCH_DATA_DIR" not in os.environ:
-        # Default to scenarios/car-bench/car-bench/mock_data if it exists
-        project_root = Path(__file__).parent.parent.parent
-        default_data_dir = project_root / "scenarios" / "car-bench" / "car-bench" / "car_bench" / "envs" / "car_voice_assistant" / "mock_data"
-        if default_data_dir.exists():
-            os.environ["CAR_BENCH_DATA_DIR"] = str(default_data_dir)
-            logger.info(f"Auto-configured CAR_BENCH_DATA_DIR={default_data_dir}")
+        if CAR_BENCH_DATA_DIR.exists():
+            os.environ["CAR_BENCH_DATA_DIR"] = str(CAR_BENCH_DATA_DIR)
+            logger.info(f"Auto-configured CAR_BENCH_DATA_DIR={CAR_BENCH_DATA_DIR}")
         else:
             logger.warning(
-                f"CAR_BENCH_DATA_DIR not set and default path not found: {default_data_dir}. "
-                "Run ./scenarios/car-bench/setup.sh to download data."
+                f"CAR_BENCH_DATA_DIR not set and default path not found: {CAR_BENCH_DATA_DIR}. "
+                f"Run {SETUP_SCRIPT.relative_to(Path(__file__).resolve().parents[2])} to download data."
             )
 
     agent_url = args.card_url or f"http://{args.host}:{args.port}/"

@@ -5,12 +5,11 @@ USER agentbeats
 RUN mkdir -p /home/agentbeats/.cache/uv
 WORKDIR /home/agentbeats/app
 
-COPY pyproject.toml uv.lock README.md ./
-COPY --chown=agentbeats:agentbeats third_party third_party
+COPY --chown=agentbeats:agentbeats pyproject.toml uv.lock README.md ./
 
 RUN \
     --mount=type=cache,target=/home/agentbeats/.cache/uv,uid=1000 \
-    uv sync --frozen --no-install-project --no-dev --extra car-bench-agent
+    uv sync --frozen --no-install-project --no-dev
 
 FROM ghcr.io/astral-sh/uv:python3.12-trixie
 
@@ -23,6 +22,4 @@ COPY --chown=agentbeats:agentbeats src src
 
 ENV PYTHONPATH=/home/agentbeats/app/src
 
-ENTRYPOINT [".venv/bin/python", "src/purple_car_bench_agent/server.py"]
-CMD ["--host", "0.0.0.0"]
-EXPOSE 8080
+ENTRYPOINT [".venv/bin/python", "src/agentbeats/client_cli.py"]

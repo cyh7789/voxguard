@@ -126,10 +126,10 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 ```bash
 # 3. Clone the CAR-bench repository
-./scenarios/car-bench/setup.sh
+./scripts/setup_car_bench.sh
 ```
 
-This will clone the car-bench repository to `scenarios/car-bench/car-bench/`. Tasks and mock data are automatically loaded from HuggingFace.
+This will clone the car-bench repository to `third_party/car-bench/`. Tasks and mock data are automatically loaded from HuggingFace. The checkout is ignored and treated as a local dependency for the green evaluator, not as repository content.
 
 ```bash
 # 4. Install dependencies
@@ -179,10 +179,10 @@ protocol to green; they differ only in their internal reasoning harness.
 
 | Agent | Package | Local Scenario | Docker Scenario | How It Works |
 |-------|---------|----------------|-----------------|--------------|
-| Template LiteLLM agent | [`src/purple_car_bench_agent/`](src/purple_car_bench_agent/) | [`scenarios/scenario.toml`](scenarios/scenario.toml) | [`scenarios/scenario-docker-local.toml`](scenarios/scenario-docker-local.toml) | Minimal participant template using a LiteLLM-compatible model. |
-| Codex JSON agent | [`src/purple_car_bench_agent_codex/`](src/purple_car_bench_agent_codex/) | [`scenarios/scenario-test-codex.toml`](scenarios/scenario-test-codex.toml) | [`scenarios/scenario-docker-codex.toml`](scenarios/scenario-docker-codex.toml) | Warm `codex app-server`; asks Spark for schema-constrained next-action JSON. |
-| Codex planner/executor | [`src/purple_car_bench_agent_codex_planner/`](src/purple_car_bench_agent_codex_planner/) | [`scenarios/scenario-test-codex-planner.toml`](scenarios/scenario-test-codex-planner.toml) | [`scenarios/scenario-docker-codex-planner.toml`](scenarios/scenario-docker-codex-planner.toml) | Plans once after each user message with a larger model, then reuses that private plan across Spark executor turns until responding. |
-| Codex Python-call DSL | [`src/purple_car_bench_agent_codex_python/`](src/purple_car_bench_agent_codex_python/) | [`scenarios/scenario-test-codex-python.toml`](scenarios/scenario-test-codex-python.toml) | [`scenarios/scenario-docker-codex-python.toml`](scenarios/scenario-docker-codex-python.toml) | Lets Spark emit a fenced Python-call action block; parses it with `ast` and maps calls back to normal A2A output. |
+| Template LiteLLM agent | [`src/purple_car_bench_agent/`](src/purple_car_bench_agent/) | [`scenarios/purple_car_bench_agent/local.toml`](scenarios/purple_car_bench_agent/local.toml) / [`scenarios/purple_car_bench_agent/smoke.toml`](scenarios/purple_car_bench_agent/smoke.toml) | [`scenarios/purple_car_bench_agent/docker-local.toml`](scenarios/purple_car_bench_agent/docker-local.toml) | Minimal participant template using a LiteLLM-compatible model; `scenarios/purple_car_bench_agent/smoke.toml` is the quick smoke scenario. |
+| Codex JSON agent | [`src/purple_car_bench_agent_codex/`](src/purple_car_bench_agent_codex/) | [`scenarios/purple_car_bench_agent_codex/smoke.toml`](scenarios/purple_car_bench_agent_codex/smoke.toml) | [`scenarios/purple_car_bench_agent_codex/docker-local.toml`](scenarios/purple_car_bench_agent_codex/docker-local.toml) | Warm `codex app-server`; asks Spark for schema-constrained next-action JSON. |
+| Codex planner/executor | [`src/purple_car_bench_agent_codex_planner/`](src/purple_car_bench_agent_codex_planner/) | [`scenarios/purple_car_bench_agent_codex_planner/smoke.toml`](scenarios/purple_car_bench_agent_codex_planner/smoke.toml) | [`scenarios/purple_car_bench_agent_codex_planner/docker-local.toml`](scenarios/purple_car_bench_agent_codex_planner/docker-local.toml) | Plans once after each user message with a larger model, then reuses that private plan across Spark executor turns until responding. |
+| Codex Python-call DSL | [`src/purple_car_bench_agent_codex_python/`](src/purple_car_bench_agent_codex_python/) | [`scenarios/purple_car_bench_agent_codex_python/smoke.toml`](scenarios/purple_car_bench_agent_codex_python/smoke.toml) | [`scenarios/purple_car_bench_agent_codex_python/docker-local.toml`](scenarios/purple_car_bench_agent_codex_python/docker-local.toml) | Lets Spark emit a fenced Python-call action block; parses it with `ast` and maps calls back to normal A2A output. |
 
 Start with the template agent if you are building a new provider integration.
 Use the Codex references as examples for more sophisticated harnessing.
@@ -195,7 +195,7 @@ Use the Codex references as examples for more sophisticated harnessing.
 
 ```bash
 # Run evaluation with default settings
-uv run agentbeats-run scenarios/scenario.toml --show-logs
+uv run agentbeats-run scenarios/purple_car_bench_agent/local.toml --show-logs
 ```
 **What happens:**
 - ✅ Starts green agent (CAR-bench evaluator) locally
@@ -204,12 +204,12 @@ uv run agentbeats-run scenarios/scenario.toml --show-logs
 
 **To see agent logs** (optional), manually listen to them in separate terminals.
 
-**Configuration**: Edit [`scenarios/scenario.toml`](scenarios/scenario.toml)
+**Configuration**: Edit [`scenarios/purple_car_bench_agent/local.toml`](scenarios/purple_car_bench_agent/local.toml)
 
 To run the Codex-backed purple agent locally:
 
 ```bash
-uv run agentbeats-run scenarios/scenario-test-codex.toml --show-logs
+uv run agentbeats-run scenarios/purple_car_bench_agent_codex/smoke.toml --show-logs
 ```
 
 This expects `codex` to be on `PATH` and authenticated before the run starts.
@@ -221,13 +221,13 @@ moving to a newer Codex CLI.
 To run the planner/executor variant:
 
 ```bash
-uv run agentbeats-run scenarios/scenario-test-codex-planner.toml --show-logs
+uv run agentbeats-run scenarios/purple_car_bench_agent_codex_planner/smoke.toml --show-logs
 ```
 
 To run the Python-call DSL variant:
 
 ```bash
-uv run agentbeats-run scenarios/scenario-test-codex-python.toml --show-logs
+uv run agentbeats-run scenarios/purple_car_bench_agent_codex_python/smoke.toml --show-logs
 ```
 
 ---
@@ -238,7 +238,7 @@ uv run agentbeats-run scenarios/scenario-test-codex-python.toml --show-logs
 
 ```bash
 # 1. Generate docker-compose.yml from scenario
-uv run python generate_compose.py --scenario scenarios/scenario-docker-local.toml
+uv run python generate_compose.py --scenario scenarios/purple_car_bench_agent/docker-local.toml
 ```
 
 ```bash
@@ -254,15 +254,15 @@ docker compose up --abort-on-container-exit
 - ✅ Runs full evaluation with logs in terminal
 - ✅ Saves results to `output/results.json`
 
-**Configuration**: Edit [`scenarios/scenario-docker-local.toml`](scenarios/scenario-docker-local.toml)
+**Configuration**: Edit [`scenarios/purple_car_bench_agent/docker-local.toml`](scenarios/purple_car_bench_agent/docker-local.toml)
 
 For the Codex-backed Docker harness, use
-[`scenarios/scenario-docker-codex.toml`](scenarios/scenario-docker-codex.toml)
+[`scenarios/purple_car_bench_agent_codex/docker-local.toml`](scenarios/purple_car_bench_agent_codex/docker-local.toml)
 and set `CODEX_HOME_HOST` in `.env` to an absolute authenticated Codex home.
 For the planner/executor Codex harness, use
-[`scenarios/scenario-docker-codex-planner.toml`](scenarios/scenario-docker-codex-planner.toml).
+[`scenarios/purple_car_bench_agent_codex_planner/docker-local.toml`](scenarios/purple_car_bench_agent_codex_planner/docker-local.toml).
 For the Python-call DSL Codex harness, use
-[`scenarios/scenario-docker-codex-python.toml`](scenarios/scenario-docker-codex-python.toml).
+[`scenarios/purple_car_bench_agent_codex_python/docker-local.toml`](scenarios/purple_car_bench_agent_codex_python/docker-local.toml).
 
 ---
 
@@ -281,13 +281,13 @@ docker push ghcr.io/yourusername/your-agent:latest
 ```
 
 ```bash
-# Update scenario-ghcr.toml with your image URLs
-uv run python generate_compose.py --scenario scenarios/scenario-ghcr.toml
+# Update scenarios/purple_car_bench_agent/ghcr.toml with your image URLs
+uv run python generate_compose.py --scenario scenarios/purple_car_bench_agent/ghcr.toml
 mkdir -p output
 docker compose up --abort-on-container-exit
 ```
 
-**Configuration**: Edit [`scenarios/scenario-ghcr.toml`](scenarios/scenario-ghcr.toml) with your GHCR image URLs
+**Configuration**: Edit [`scenarios/purple_car_bench_agent/ghcr.toml`](scenarios/purple_car_bench_agent/ghcr.toml) with your GHCR image URLs
 
 ---
 
@@ -629,19 +629,30 @@ src/
     └── Dockerfile.car-bench-agent-codex-python
 
 scenarios/
-├── scenario.toml                  # Local Python mode config
-├── scenario-test-codex.toml       # Local Codex purple-agent smoke config
-├── scenario-test-codex-planner.toml # Local Codex planner/executor smoke config
-├── scenario-test-codex-python.toml # Local Codex Python-call smoke config
-├── scenario-docker-local.toml     # Local Docker build config
-├── scenario-docker-codex.toml     # Local Docker Codex config
-├── scenario-docker-codex-planner.toml # Local Docker Codex planner/executor config
-├── scenario-docker-codex-python.toml # Local Docker Codex Python-call config
-└── scenario-ghcr.toml             # Published images config
+├── README.md                      # Scenario map
+├── purple_car_bench_agent/        # Baseline LiteLLM template scenarios
+│   ├── local.toml                 # Local Python run
+│   ├── smoke.toml                 # Quick local smoke run
+│   ├── docker-local.toml          # Local Docker build run
+│   └── ghcr.toml                  # Published baseline image run
+├── purple_car_bench_agent_codex/  # Codex JSON scenarios
+│   ├── smoke.toml
+│   └── docker-local.toml
+├── purple_car_bench_agent_codex_planner/ # Codex planner/executor scenarios
+│   ├── smoke.toml
+│   └── docker-local.toml
+└── purple_car_bench_agent_codex_python/ # Codex Python-call DSL scenarios
+    ├── smoke.toml
+    └── docker-local.toml
 
-scenarios/car-bench/car-bench/     # Original CAR-bench (manually cloned in step 2)
-└── car_bench/                     # Environment, tools, user simulator, mock data (130K POIs, 1.7M routes, etc.)
-    ├── envs/                      # Environment, tools, user simulator
+scripts/
+└── setup_car_bench.sh             # Clones the local ignored CAR-bench dependency
+
+third_party/
+├── README.md                      # Local dependency notes
+└── car-bench/                     # Original CAR-bench checkout, ignored by git
+    └── car_bench/                 # Environment, tools, user simulator, mock data (130K POIs, 1.7M routes, etc.)
+        └── envs/                  # Environment, tools, user simulator
 ```
 
 ---
@@ -651,6 +662,8 @@ scenarios/car-bench/car-bench/     # Original CAR-bench (manually cloned in step
 Want to build and test your own agent? The purple agent is the **agent under test**: it receives tasks from the green agent (CAR-bench evaluator) via the **A2A protocol** and responds with tool calls or text.
 
 **[Full Development Guide →](src/purple_car_bench_agent/DEVELOPMENT_GUIDE.md)** — Covers the message protocol, conversation lifecycle, and everything you need to implement a custom agent.
+
+**[A2A Introduction →](docs/a2a-introduction.md)** — Background protocol walkthrough with examples from this repository.
 
 **[Harness Design Notes →](docs/purple-agent-harnessing.md)** — Explains how to build more sophisticated purple-agent harnesses while preserving CAR-bench semantics.
 

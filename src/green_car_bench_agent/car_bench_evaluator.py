@@ -43,11 +43,11 @@ from turn_metrics import (
     TURN_METRICS_KEY, SOURCE_KEY, SOURCE_USER, SOURCE_ENVIRONMENT,
     extract_turn_metrics, AVG_LLM_CALL_TIME_MS, NUM_LLM_CALLS, COST,
 )
+from car_bench_paths import CAR_BENCH_REPO
 sys.path.pop(0)
 
 # Import run.py from car-bench repo root
-car_bench_repo = Path(__file__).parent.parent.parent / "scenarios" / "car-bench" / "car-bench"
-sys.path.insert(0, str(car_bench_repo))
+sys.path.insert(0, str(CAR_BENCH_REPO))
 from run import run as run_benchmark
 sys.path.pop(0)
 
@@ -330,8 +330,7 @@ def calculate_evaluation_results(
         Tuple of (result_data dict, summary string)
     """
     # Import analysis functions from car-bench repo root
-    car_bench_repo = Path(__file__).parent.parent.parent / "scenarios" / "car-bench" / "car-bench"
-    sys.path.insert(0, str(car_bench_repo))
+    sys.path.insert(0, str(CAR_BENCH_REPO))
     try:
         from analyze_results_v2 import (
             organize_data_by_task_and_trial,
