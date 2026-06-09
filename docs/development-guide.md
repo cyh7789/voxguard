@@ -19,7 +19,7 @@ must send on each A2A turn.
 > **Reference implementations:** The same wire contract is demonstrated by:
 > - [`src/track_1_agent_under_test/`](../src/track_1_agent_under_test/) — Track 1 minimal LiteLLM-compatible template
 > - [`src/track_2_agent_under_test_cerebras/`](../src/track_2_agent_under_test_cerebras/) — Track 2 direct Cerebras next-action adapter
-> - [`src/track_2_agent_under_test_cerebras_planner/`](../src/track_2_agent_under_test_cerebras_planner/) — Track 2 private planner plus Cerebras executor
+> - [`src/track_2_agent_under_test_cerebras_planner/`](../src/track_2_agent_under_test_cerebras_planner/) — Track 2 Cerebras planner plus Cerebras executor
 >
 > For more sophisticated harnessing, see
 > [`agent-under-test-harnessing.md`](agent-under-test-harnessing.md) and
@@ -321,35 +321,26 @@ The metadata shape is:
 Field meanings:
 
 - `prompt_tokens`, `completion_tokens`, `thinking_tokens`: report provider
-  usage when available; use `0` when unavailable. The LiteLLM templates read
-  these from the provider response usage object when present.
+  usage when available; use `0` when unavailable. The reference templates read
+  these from provider response usage objects when present.
 - `cost`: provider cost for the internal calls in this assistant step; use
   `0.0` for subscription-backed runtimes that do not expose reliable cost.
 - `model`: the model or harness description, such as
-  `cerebras/gpt-oss-120b` or `azure/gpt-5.5->cerebras/gpt-oss-120b`.
+  `gpt-oss-120b` or `gpt-oss-120b->gpt-oss-120b`.
 - `num_llm_calls`: number of internal model calls made before returning this
   final response.
 - `avg_llm_call_time_ms`: average duration of successful internal provider
-  calls. Do not include local scheduler sleeps, failed rate-limit attempts, app
-  startup, parser work, or debug probes. Successful planner/executor calls do
+  calls. Do not include local queueing sleeps, failed rate-limit attempts, app
+  startup, parser work, or debug work. Successful planner/executor calls do
   count as provider calls.
 - `num_passes`: number of internal inference passes if the harness has a
   multi-pass planner, executor, ensemble, or validator. Use `1` for a normal
   single-pass agent.
-- `quota_wait_time_ms`: optional CAR-bench metadata extension for time spent
-  waiting for a real provider or subscription quota reset. The evaluator reports
-  both raw and corrected timing: `raw_turn_time_ms` is the evaluator-observed
-  blocked turn time, `turn_time_ms` is raw turn time minus trusted quota wait,
-  and final reports include `raw_time_used`, `time_used`, and
-  `quota_wait_time`. Final reports also include `successful_llm_time_used`,
-  summed from successful provider-call durations in `turn_metrics`. The Track 2
-  Cerebras templates leave quota wait at `0.0` and use rate-limit report files
-  for diagnosis/audit instead of taking a timing discount.
-
-`quota_wait_time_ms` is a trusted field, not a free self-reported latency
-discount. False or inflated quota-wait reporting is cheating and may be manually
-checked against provider-visible reset events, raw evaluator timing, logs, and
-rate-limit report files.
+- `quota_wait_time_ms`: optional CAR-bench metadata extension reserved for
+  provider or subscription quota-wait accounting. Final time-budget and
+  quota-wait accounting details will be announced before the official
+  evaluation. Until then, attach only metadata you can measure reliably and keep
+  provider logs or rate-limit report files when the harness has to wait.
 
 The evaluator adds its own measured `turn_time_ms` after receiving the response.
 Agents should not send `turn_time_ms` themselves.
@@ -359,8 +350,8 @@ The reference agents conform to this contract:
 | Agent | Message Parts | Metadata |
 |-------|---------------|----------|
 | `src/track_1_agent_under_test/` | text Part, data Part with `{"tool_calls": ...}`, optional `reasoning_content` | Aggregated LiteLLM usage on final no-tool-call responses |
-| `src/track_2_agent_under_test_cerebras/` | text Part for `respond`, data Part with `{"tool_calls": ...}` for actions | LiteLLM usage, cost, latency, and call count |
-| `src/track_2_agent_under_test_cerebras_planner/` | Same as direct Cerebras agent | Planner plus executor call counts, combined model label, and aggregated LiteLLM usage |
+| `src/track_2_agent_under_test_cerebras/` | text Part for `respond`, data Part with `{"tool_calls": ...}` for actions | Cerebras SDK usage, latency, call count, and rate-limit report evidence when applicable |
+| `src/track_2_agent_under_test_cerebras_planner/` | Same as direct Cerebras agent | Planner plus executor call counts, combined model label, and aggregated provider usage |
 
 For shared constants, see [`src/turn_metrics.py`](../src/turn_metrics.py).
 

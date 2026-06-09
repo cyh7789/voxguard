@@ -1,4 +1,4 @@
-"""CAR-bench Track 2 agent using direct Cerebras inference via LiteLLM."""
+"""CAR-bench Track 2 agent using direct Cerebras SDK inference."""
 
 from __future__ import annotations
 
@@ -33,25 +33,25 @@ from turn_metrics import (
 sys.path.pop(0)
 
 if __package__:
-    from .litellm_client import (
+    from .cerebras_client import (
         DEFAULT_CEREBRAS_API_BASE,
         DEFAULT_EXECUTOR_MODEL,
-        LiteLLMCompletionClient,
-        LiteLLMSchedulerConfig,
-        LiteLLMTemplateError,
-        LiteLLMTokenUsage,
+        DEFAULT_EXECUTOR_REASONING_EFFORT,
+        CerebrasCompletionClient,
+        CerebrasTemplateError,
         MalformedModelResponseError,
+        TokenUsage,
         add_token_usage,
     )
 else:
-    from litellm_client import (
+    from cerebras_client import (
         DEFAULT_CEREBRAS_API_BASE,
         DEFAULT_EXECUTOR_MODEL,
-        LiteLLMCompletionClient,
-        LiteLLMSchedulerConfig,
-        LiteLLMTemplateError,
-        LiteLLMTokenUsage,
+        DEFAULT_EXECUTOR_REASONING_EFFORT,
+        CerebrasCompletionClient,
+        CerebrasTemplateError,
         MalformedModelResponseError,
+        TokenUsage,
         add_token_usage,
     )
 
@@ -65,7 +65,7 @@ class AgentInferenceResult:
 
     next_action: dict[str, Any]
     elapsed_ms: float
-    token_usage: LiteLLMTokenUsage | None = None
+    token_usage: TokenUsage | None = None
     cost: float = 0.0
     internal_calls: int = 1
     quota_wait_ms: float = 0.0
@@ -80,22 +80,20 @@ class CARBenchAgentExecutor(AgentExecutor):
         model: str = DEFAULT_EXECUTOR_MODEL,
         api_base: str = DEFAULT_CEREBRAS_API_BASE,
         service_tier: str | None = None,
-        temperature: float | None = 0.0,
+        temperature: float | None = None,
+        reasoning_effort: str | None = DEFAULT_EXECUTOR_REASONING_EFFORT,
         max_completion_tokens: int = 1024,
-        min_interval_seconds: float = 0.0,
-        scheduler_config: LiteLLMSchedulerConfig | None = None,
         malformed_retries: int = 1,
     ) -> None:
         self.model = model
         self.temperature = temperature
+        self.reasoning_effort = reasoning_effort
         self.max_completion_tokens = max_completion_tokens
         self.malformed_retries = malformed_retries
-        self.client = LiteLLMCompletionClient(
+        self.client = CerebrasCompletionClient(
             api_base=api_base,
             service_tier=service_tier,
-            min_interval_seconds=min_interval_seconds,
-            scheduler_config=scheduler_config,
-            logger=logger.bind(role="agent_under_test", context="litellm"),
+            logger=logger.bind(role="agent_under_test", context="cerebras"),
         )
         self.ctx_id_to_messages: dict[str, list[dict[str, Any]]] = {}
         self.ctx_id_to_tools: dict[str, list[dict[str, Any]]] = {}
@@ -212,8 +210,9 @@ class CARBenchAgentExecutor(AgentExecutor):
         last_error: Exception | None = None
         correction = None
         total_duration_ms = 0.0
-        total_token_usage: LiteLLMTokenUsage | None = None
+        total_token_usage: TokenUsage | None = None
         total_cost = 0.0
+        total_quota_wait_ms = 0.0
         internal_calls = 0
 
         for attempt in range(self.malformed_retries + 1):
@@ -230,6 +229,7 @@ class CARBenchAgentExecutor(AgentExecutor):
                 num_tools=len(tools),
                 prompt_chars=len(prompt),
                 max_completion_tokens=self.max_completion_tokens,
+                reasoning_effort=self.reasoning_effort,
                 tool_names=[
                     tool.get("function", {}).get("name", "<unknown>")
                     for tool in tools[:10]
@@ -249,6 +249,7 @@ class CARBenchAgentExecutor(AgentExecutor):
                     response_schema_name="next_action",
                     max_completion_tokens=self.max_completion_tokens,
                     temperature=self.temperature,
+                    reasoning_effort=self.reasoning_effort,
                 )
                 internal_calls += 1
                 total_duration_ms += result.duration_ms
@@ -257,6 +258,7 @@ class CARBenchAgentExecutor(AgentExecutor):
                     total_token_usage,
                     result.token_usage,
                 )
+                total_quota_wait_ms += result.quota_wait_ms
                 parsed = parse_next_action(result.text)
                 ctx_logger.info(
                     "Cerebras response received",
@@ -292,6 +294,7 @@ class CARBenchAgentExecutor(AgentExecutor):
                         else 0
                     ),
                     attempt=attempt + 1,
+                    quota_wait_ms=round(result.quota_wait_ms, 1),
                 )
                 return AgentInferenceResult(
                     next_action=parsed,
@@ -299,6 +302,7 @@ class CARBenchAgentExecutor(AgentExecutor):
                     token_usage=total_token_usage,
                     cost=total_cost,
                     internal_calls=max(internal_calls, 1),
+                    quota_wait_ms=total_quota_wait_ms,
                 )
             except (MalformedModelResponseError, json.JSONDecodeError) as exc:
                 last_error = exc
@@ -312,7 +316,7 @@ class CARBenchAgentExecutor(AgentExecutor):
                     retrying=attempt < self.malformed_retries,
                     error=str(exc),
                 )
-            except LiteLLMTemplateError:
+            except CerebrasTemplateError:
                 raise
 
         raise MalformedModelResponseError(
@@ -424,7 +428,7 @@ class CARBenchAgentExecutor(AgentExecutor):
         context_id: str,
         elapsed_ms: float,
         *,
-        token_usage: LiteLLMTokenUsage | None = None,
+        token_usage: TokenUsage | None = None,
         cost: float = 0.0,
         internal_calls: int = 1,
         quota_wait_ms: float = 0.0,

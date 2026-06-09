@@ -15,17 +15,17 @@ from a2a.types import AgentCard
 
 if __package__:
     from .car_bench_agent import CARBenchAgentExecutor
-    from .litellm_client import (
+    from .cerebras_client import (
         DEFAULT_CEREBRAS_API_BASE,
         DEFAULT_EXECUTOR_MODEL,
-        LiteLLMSchedulerConfig,
+        DEFAULT_EXECUTOR_REASONING_EFFORT,
     )
 else:
     from car_bench_agent import CARBenchAgentExecutor
-    from litellm_client import (
+    from cerebras_client import (
         DEFAULT_CEREBRAS_API_BASE,
         DEFAULT_EXECUTOR_MODEL,
-        LiteLLMSchedulerConfig,
+        DEFAULT_EXECUTOR_REASONING_EFFORT,
     )
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -56,64 +56,6 @@ def _env_int(name: str, default: int) -> int:
     return int(value)
 
 
-def _scheduler_config_from_args(args) -> LiteLLMSchedulerConfig:
-    return LiteLLMSchedulerConfig(
-        min_interval_seconds=(
-            args.min_interval_seconds
-            if args.min_interval_seconds is not None
-            else _env_float("TRACK2_LLM_MIN_INTERVAL_SECONDS", 0.0)
-        )
-        or 0.0,
-        requests_per_minute=(
-            args.requests_per_minute
-            if args.requests_per_minute is not None
-            else _env_float("TRACK2_LLM_REQUESTS_PER_MINUTE")
-        ),
-        requests_per_hour=(
-            args.requests_per_hour
-            if args.requests_per_hour is not None
-            else _env_float("TRACK2_LLM_REQUESTS_PER_HOUR")
-        ),
-        requests_per_day=(
-            args.requests_per_day
-            if args.requests_per_day is not None
-            else _env_float("TRACK2_LLM_REQUESTS_PER_DAY")
-        ),
-        tokens_per_minute=(
-            args.tokens_per_minute
-            if args.tokens_per_minute is not None
-            else _env_float("TRACK2_LLM_TOKENS_PER_MINUTE")
-        ),
-        tokens_per_hour=(
-            args.tokens_per_hour
-            if args.tokens_per_hour is not None
-            else _env_float("TRACK2_LLM_TOKENS_PER_HOUR")
-        ),
-        tokens_per_day=(
-            args.tokens_per_day
-            if args.tokens_per_day is not None
-            else _env_float("TRACK2_LLM_TOKENS_PER_DAY")
-        ),
-        token_estimate_chars_per_token=(
-            args.token_estimate_chars_per_token
-            if args.token_estimate_chars_per_token is not None
-            else _env_float("TRACK2_LLM_TOKEN_ESTIMATE_CHARS_PER_TOKEN", 4.0)
-        )
-        or 4.0,
-        token_safety_factor=(
-            args.token_safety_factor
-            if args.token_safety_factor is not None
-            else _env_float("TRACK2_LLM_TOKEN_SAFETY_FACTOR", 1.1)
-        )
-        or 1.1,
-        max_schedule_wait_seconds=(
-            args.max_schedule_wait_seconds
-            if args.max_schedule_wait_seconds is not None
-            else _env_float("TRACK2_LLM_MAX_SCHEDULE_WAIT_SECONDS")
-        ),
-    )
-
-
 def prepare_agent_card(url: str) -> AgentCard:
     """Create the agent card for the Cerebras agent under test."""
 
@@ -121,7 +63,7 @@ def prepare_agent_card(url: str) -> AgentCard:
         name="car_bench_agent_cerebras",
         description=(
             "In-car voice assistant agent for CAR-bench using direct "
-            "Cerebras inference through LiteLLM"
+            "Cerebras SDK inference"
         ),
         version="1.0.0",
         default_input_modes=["text/plain", "application/json"],
@@ -154,20 +96,11 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--card-url", type=str)
     parser.add_argument("--executor-model", type=str, default=None)
-    parser.add_argument("--api-base", type=str, default=None)
     parser.add_argument("--service-tier", type=str, default=None)
     parser.add_argument("--temperature", type=float, default=None)
+    parser.add_argument("--reasoning-effort", type=str, default=None)
+    parser.add_argument("--executor-reasoning-effort", type=str, default=None)
     parser.add_argument("--max-completion-tokens", type=int, default=None)
-    parser.add_argument("--min-interval-seconds", type=float, default=None)
-    parser.add_argument("--requests-per-minute", type=float, default=None)
-    parser.add_argument("--requests-per-hour", type=float, default=None)
-    parser.add_argument("--requests-per-day", type=float, default=None)
-    parser.add_argument("--tokens-per-minute", type=float, default=None)
-    parser.add_argument("--tokens-per-hour", type=float, default=None)
-    parser.add_argument("--tokens-per-day", type=float, default=None)
-    parser.add_argument("--token-estimate-chars-per-token", type=float, default=None)
-    parser.add_argument("--token-safety-factor", type=float, default=None)
-    parser.add_argument("--max-schedule-wait-seconds", type=float, default=None)
     parser.add_argument("--malformed-retries", type=int, default=None)
     args = parser.parse_args()
 
@@ -179,11 +112,6 @@ def main() -> None:
         if args.executor_model is not None
         else _env_or_default("TRACK2_EXECUTOR_MODEL", DEFAULT_EXECUTOR_MODEL)
     )
-    api_base = (
-        args.api_base
-        if args.api_base is not None
-        else _env_or_default("TRACK2_CEREBRAS_API_BASE", DEFAULT_CEREBRAS_API_BASE)
-    )
     service_tier = (
         args.service_tier
         if args.service_tier is not None
@@ -192,19 +120,25 @@ def main() -> None:
     temperature = (
         args.temperature
         if args.temperature is not None
-        else _env_float("TRACK2_TEMPERATURE", 0.0)
+        else _env_float("TRACK2_TEMPERATURE")
+    )
+    reasoning_effort = (
+        args.executor_reasoning_effort
+        if args.executor_reasoning_effort is not None
+        else (
+            args.reasoning_effort
+            if args.reasoning_effort is not None
+            else _env_or_default(
+                "TRACK2_EXECUTOR_REASONING_EFFORT",
+                DEFAULT_EXECUTOR_REASONING_EFFORT,
+            )
+        )
     )
     max_completion_tokens = (
         args.max_completion_tokens
         if args.max_completion_tokens is not None
         else _env_int("TRACK2_MAX_COMPLETION_TOKENS", 1024)
     )
-    min_interval_seconds = (
-        args.min_interval_seconds
-        if args.min_interval_seconds is not None
-        else _env_float("TRACK2_LLM_MIN_INTERVAL_SECONDS", 0.0)
-    )
-    scheduler_config = _scheduler_config_from_args(args)
     malformed_retries = (
         args.malformed_retries
         if args.malformed_retries is not None
@@ -214,12 +148,10 @@ def main() -> None:
     logger.info(
         "Starting CAR-bench agent (Cerebras)",
         executor_model=executor_model,
-        api_base=api_base,
         service_tier=service_tier,
         temperature=temperature,
+        reasoning_effort=reasoning_effort,
         max_completion_tokens=max_completion_tokens,
-        min_interval_seconds=min_interval_seconds,
-        scheduler=scheduler_config.as_log_dict(),
         malformed_retries=malformed_retries,
         host=args.host,
         port=args.port,
@@ -230,12 +162,11 @@ def main() -> None:
     request_handler = DefaultRequestHandler(
         agent_executor=CARBenchAgentExecutor(
             model=executor_model or DEFAULT_EXECUTOR_MODEL,
-            api_base=api_base or DEFAULT_CEREBRAS_API_BASE,
+            api_base=DEFAULT_CEREBRAS_API_BASE,
             service_tier=service_tier,
             temperature=temperature,
+            reasoning_effort=reasoning_effort,
             max_completion_tokens=max_completion_tokens,
-            min_interval_seconds=min_interval_seconds or 0.0,
-            scheduler_config=scheduler_config,
             malformed_retries=malformed_retries,
         ),
         task_store=InMemoryTaskStore(),

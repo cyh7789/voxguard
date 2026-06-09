@@ -133,11 +133,11 @@ The Track 1 starter is documented in
 
 ### Track 2 Setup
 
-Track 2 uses direct Cerebras `gpt-oss` inference through LiteLLM. Participants
-should use a Cerebras-hosted `gpt-oss` model as the executor; the reference
-executor defaults to `cerebras/gpt-oss-120b`. The planner/executor template
-requires participants to provide their own closed-source planner model route
-through `TRACK2_PLANNER_MODEL`.
+Track 2 uses direct Cerebras `gpt-oss` inference through the Cerebras Python SDK.
+Participants should use Cerebras-hosted `gpt-oss` models. The direct executor
+defaults to `gpt-oss-120b` with `TRACK2_EXECUTOR_REASONING_EFFORT=medium`. The
+planner/executor template also defaults the private planner to `gpt-oss-120b`,
+with `TRACK2_PLANNER_REASONING_EFFORT=high` and executor effort `medium`.
 
 ```bash
 uv sync --extra track-2-agent --extra car-bench-evaluator
@@ -148,33 +148,32 @@ Then add the evaluator and Cerebras keys to `.env`:
 ```bash
 GEMINI_API_KEY=...
 CEREBRAS_API_KEY=...
-TRACK2_EXECUTOR_MODEL=cerebras/gpt-oss-120b
+TRACK2_EXECUTOR_MODEL=gpt-oss-120b
+TRACK2_EXECUTOR_REASONING_EFFORT=medium
 ```
 
-For the planner/executor template, also set the planner model and whichever
-provider key that LiteLLM route needs:
+For the planner/executor template, the default planner is also Cerebras
+`gpt-oss-120b`:
 
 ```bash
-TRACK2_PLANNER_MODEL=azure/gpt-5.5
-AZURE_API_KEY=...
+TRACK2_PLANNER_MODEL=gpt-oss-120b
+TRACK2_PLANNER_REASONING_EFFORT=high
+TRACK2_PLANNER_MAX_COMPLETION_TOKENS=4096
 ```
+
+Leave `TRACK2_PLANNER_TEMPERATURE` and `TRACK2_TEMPERATURE` unset unless the
+provider should receive an explicit temperature value.
 
 Public Cerebras development-tier limits can be strict. Use smoke scenarios
-first, keep `TRACK2_MAX_COMPLETION_TOKENS` tight, and configure local quota
-pacing for longer runs when needed:
-
-```bash
-TRACK2_LLM_REQUESTS_PER_MINUTE=30
-TRACK2_LLM_TOKENS_PER_MINUTE=60000
-TRACK2_LLM_TOKENS_PER_DAY=1000000
-TRACK2_LLM_MAX_SCHEDULE_WAIT_SECONDS=60
-```
-
-Unset quota dimensions are ignored. Local pacing is ordinary scheduling inside
-your harness, not provider quota-reset waiting, so the Cerebras templates keep
-`quota_wait_time_ms` at `0.0`. Cerebras 429s write JSON reports to
-`/tmp/car-bench-rate-limit-reports` by default. Expect organizers to provide a
-few elevated-rate/priority test windows for speed-sensitive validation.
+first and keep `TRACK2_MAX_COMPLETION_TOKENS` tight. The reference templates
+retry reactively only after a Cerebras 429, using
+`x-ratelimit-reset-tokens-minute` when Cerebras provides it and falling back to
+`retry-after` otherwise. Provider queue pressure uses jittered local backoff.
+Cerebras 429s write JSON reports to
+`/tmp/car-bench-rate-limit-reports` by default. Expect organizers to provide
+a few elevated-rate/priority test windows for speed-sensitive validation.
+Final time-budget and quota-wait accounting details will be announced before
+the official evaluation.
 Participants may self-host the open-source models used by Cerebras during
 ordinary development. Codex Pro plans are still provided to selected Track 2
 teams for faster harness engineering and development, with allocation by
@@ -221,7 +220,7 @@ For exact A2A shapes, protobuf helper usage, metadata, and code references, read
 | --- | --- | --- | --- |
 | Track 1 template | [`src/track_1_agent_under_test/`](src/track_1_agent_under_test/) | [`scenarios/track_1_agent_under_test/`](scenarios/track_1_agent_under_test/) | Building your own provider/model integration |
 | Track 2 Cerebras | [`src/track_2_agent_under_test_cerebras/`](src/track_2_agent_under_test_cerebras/) | [`scenarios/track_2_agent_under_test_cerebras/`](scenarios/track_2_agent_under_test_cerebras/) | Direct Cerebras next-action baseline |
-| Track 2 planner/executor | [`src/track_2_agent_under_test_cerebras_planner/`](src/track_2_agent_under_test_cerebras_planner/) | [`scenarios/track_2_agent_under_test_cerebras_planner/`](scenarios/track_2_agent_under_test_cerebras_planner/) | Private planner plus Cerebras `gpt-oss` executor |
+| Track 2 planner/executor | [`src/track_2_agent_under_test_cerebras_planner/`](src/track_2_agent_under_test_cerebras_planner/) | [`scenarios/track_2_agent_under_test_cerebras_planner/`](scenarios/track_2_agent_under_test_cerebras_planner/) | Cerebras `gpt-oss` planner with high reasoning plus Cerebras `gpt-oss` executor with medium reasoning |
 
 ---
 

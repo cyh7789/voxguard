@@ -48,8 +48,8 @@ A robust agent-under-test harness usually has four layers:
 
 The Track 2 Cerebras Fast-Reasoning implementation in
 `src/track_2_agent_under_test_cerebras/` follows this shape and keeps direct
-LiteLLM/Cerebras details behind a small client wrapper. For Track 2 model
-selection, public-tier scheduling, and multi-pass templates, see
+Cerebras SDK details behind a small client wrapper. For Track 2 model
+selection, public-tier rate-limit handling, and multi-pass templates, see
 `docs/cerebras-harness-patterns.md`. A concrete planner/executor reference
 agent lives in `src/track_2_agent_under_test_cerebras_planner/`.
 
@@ -59,7 +59,7 @@ Reference packages:
 |---------|---------|
 | `src/track_1_agent_under_test/` | Minimal LiteLLM-compatible template agent. |
 | `src/track_2_agent_under_test_cerebras/` | Track 2 direct Cerebras agent returning next-action JSON. |
-| `src/track_2_agent_under_test_cerebras_planner/` | Track 2 private planner plus Cerebras executor. |
+| `src/track_2_agent_under_test_cerebras_planner/` | Track 2 Cerebras planner/executor template. |
 
 ## Important Design Rules
 
@@ -75,14 +75,11 @@ Reference packages:
   is acceptable to report token and cost fields as zero for runtimes that do
   not expose usage. LiteLLM exposes provider usage when the provider response
   includes it.
-- Quota-wait metadata must be backed by provider-visible reset events, logs, or
-  rate-limit report files. Ordinary slow inference, malformed-output retries,
-  local queueing, startup time, and planner/tool latency are not quota waits.
-  Successful planner or executor provider calls still count toward
-  `num_llm_calls` and `avg_llm_call_time_ms`; failed rate-limit attempts and
-  scheduler sleeps do not.
-  Official or manual review may compare reported quota waits with raw evaluator
-  timing and provider logs; false or inflated quota-wait reporting is cheating.
+- Final time-budget and quota-wait accounting details will be announced before
+  the official evaluation. Until then, attach only metadata you can measure
+  reliably and keep provider logs or rate-limit report files when the harness
+  has to wait. Successful planner or executor provider calls still count toward
+  `num_llm_calls` and `avg_llm_call_time_ms`.
 
 ## Agentic Harness Boundaries
 
@@ -111,7 +108,7 @@ Your harness must not:
 
 ## Track 2 Cerebras Harness
 
-The direct Track 2 agent calls Cerebras through LiteLLM and asks for
+The direct Track 2 agent calls Cerebras through the Cerebras SDK and asks for
 schema-constrained next-action JSON:
 
 ```json
@@ -143,11 +140,13 @@ and dynamic transcript content last so provider prompt caching has a stable
 prefix to reuse when supported.
 
 During development, the Cerebras public tier can have strict rate limits. Use
-smoke scenarios first, configure `TRACK2_LLM_MIN_INTERVAL_SECONDS` for longer
-local runs, and schedule public validation runs instead of launching many at
-once. The reference client logs raw LiteLLM/Cerebras exceptions, but trusted
-quota-wait accounting is intentionally left disabled until the exact raw
-rate-limit error shape is confirmed.
+smoke scenarios first, keep completion-token caps tight, and schedule public
+validation runs instead of launching many at once. The reference client waits
+reactively only after Cerebras 429s, preferring
+`x-ratelimit-reset-tokens-minute` when present, writes JSON reports for those
+429s, and applies jittered local backoff for provider queue pressure. Final
+time-budget and quota-wait accounting details will be announced before the
+official evaluation.
 
 ## Extension Ideas
 

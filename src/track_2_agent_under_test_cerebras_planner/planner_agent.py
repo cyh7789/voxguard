@@ -14,14 +14,17 @@ from track_2_agent_under_test_cerebras.car_bench_agent import (
     NEXT_ACTION_OUTPUT_SCHEMA,
     CARBenchAgentExecutor as CerebrasNextActionExecutor,
     build_next_action_prompt,
+    logger as cerebras_agent_logger,
     parse_next_action,
 )
-from track_2_agent_under_test_cerebras.litellm_client import (
+from track_2_agent_under_test_cerebras.cerebras_client import (
+    DEFAULT_CEREBRAS_API_BASE,
     DEFAULT_EXECUTOR_MODEL,
-    LiteLLMSchedulerConfig,
-    LiteLLMTemplateError,
-    LiteLLMTokenUsage,
+    DEFAULT_EXECUTOR_REASONING_EFFORT,
+    CerebrasCompletionClient,
+    CerebrasTemplateError,
     MalformedModelResponseError,
+    TokenUsage,
     add_token_usage,
 )
 from turn_metrics import (
@@ -38,41 +41,58 @@ from turn_metrics import (
 sys.path.pop(0)
 
 
-DEFAULT_PLANNER_MAX_COMPLETION_TOKENS = 2048
+DEFAULT_PLANNER_MAX_COMPLETION_TOKENS = 4096
 DEFAULT_EXECUTOR_MAX_COMPLETION_TOKENS = 1024
+DEFAULT_PLANNER_MODEL = DEFAULT_EXECUTOR_MODEL
+DEFAULT_PLANNER_REASONING_EFFORT = "high"
 
 
 class PlannerExecutorCARBenchAgentExecutor(CerebrasNextActionExecutor):
-    """A2A executor with a private planner call and Cerebras executor call."""
+    """A2A executor with Cerebras private planning and Cerebras execution."""
 
     def __init__(
         self,
         *,
-        planner_model: str,
+        planner_model: str = DEFAULT_PLANNER_MODEL,
         executor_model: str = DEFAULT_EXECUTOR_MODEL,
         planner_max_completion_tokens: int = DEFAULT_PLANNER_MAX_COMPLETION_TOKENS,
         executor_max_completion_tokens: int = DEFAULT_EXECUTOR_MAX_COMPLETION_TOKENS,
-        api_base: str,
+        api_base: str | None = DEFAULT_CEREBRAS_API_BASE,
         service_tier: str | None = None,
-        temperature: float | None = 0.0,
-        min_interval_seconds: float = 0.0,
-        scheduler_config: LiteLLMSchedulerConfig | None = None,
+        temperature: float | None = None,
+        planner_temperature: float | None = None,
+        executor_temperature: float | None = None,
+        planner_reasoning_effort: str | None = DEFAULT_PLANNER_REASONING_EFFORT,
+        executor_reasoning_effort: str | None = DEFAULT_EXECUTOR_REASONING_EFFORT,
         malformed_retries: int = 1,
     ) -> None:
+        if executor_temperature is None:
+            executor_temperature = temperature
         super().__init__(
             model=executor_model,
             api_base=api_base,
             service_tier=service_tier,
-            temperature=temperature,
+            temperature=executor_temperature,
+            reasoning_effort=executor_reasoning_effort,
             max_completion_tokens=executor_max_completion_tokens,
-            min_interval_seconds=min_interval_seconds,
-            scheduler_config=scheduler_config,
             malformed_retries=malformed_retries,
         )
         self.planner_model = planner_model
         self.executor_model = executor_model
         self.planner_max_completion_tokens = planner_max_completion_tokens
         self.executor_max_completion_tokens = executor_max_completion_tokens
+        self.planner_temperature = planner_temperature
+        self.executor_temperature = executor_temperature
+        self.planner_reasoning_effort = planner_reasoning_effort
+        self.executor_reasoning_effort = executor_reasoning_effort
+        self.planner_client = CerebrasCompletionClient(
+            api_base=api_base,
+            service_tier=service_tier,
+            logger=cerebras_agent_logger.bind(
+                role="agent_under_test",
+                context="planner",
+            ),
+        )
         self._last_internal_call_count = 0
         self._active_private_plans_by_context: dict[str, dict[str, Any]] = {}
 
@@ -91,12 +111,17 @@ class PlannerExecutorCARBenchAgentExecutor(CerebrasNextActionExecutor):
         last_error: Exception | None = None
         correction = None
         total_duration_ms = 0.0
-        total_token_usage: LiteLLMTokenUsage | None = None
+        total_token_usage: TokenUsage | None = None
         total_cost = 0.0
+        total_quota_wait_ms = 0.0
         internal_call_count = 0
         planner_ms = 0.0
         plan_source = "new_user_turn"
         private_plan: dict[str, Any] | None = None
+        last_model_stage = "planner"
+        last_model_text = ""
+        last_finish_reason: str | None = None
+        last_token_usage: TokenUsage | None = None
 
         if _should_create_private_plan(messages):
             self._active_private_plans_by_context.pop(context_id, None)
@@ -134,8 +159,9 @@ class PlannerExecutorCARBenchAgentExecutor(CerebrasNextActionExecutor):
                         num_tools=len(tools),
                         prompt_chars=len(planner_prompt),
                         max_completion_tokens=self.planner_max_completion_tokens,
+                        reasoning_effort=self.planner_reasoning_effort,
                     )
-                    plan_result = self.client.generate(
+                    plan_result = self.planner_client.generate(
                         model=self.planner_model,
                         messages=[
                             {
@@ -147,11 +173,17 @@ class PlannerExecutorCARBenchAgentExecutor(CerebrasNextActionExecutor):
                         response_schema=PRIVATE_PLAN_OUTPUT_SCHEMA,
                         response_schema_name="private_plan",
                         max_completion_tokens=self.planner_max_completion_tokens,
-                        temperature=self.temperature,
+                        temperature=self.planner_temperature,
+                        reasoning_effort=self.planner_reasoning_effort,
                     )
+                    last_model_stage = "planner"
+                    last_model_text = plan_result.text
+                    last_finish_reason = plan_result.finish_reason
+                    last_token_usage = plan_result.token_usage
                     internal_call_count += 1
                     total_duration_ms += plan_result.duration_ms
                     total_cost += plan_result.cost
+                    total_quota_wait_ms += plan_result.quota_wait_ms
                     total_token_usage = add_token_usage(
                         total_token_usage,
                         plan_result.token_usage,
@@ -163,7 +195,18 @@ class PlannerExecutorCARBenchAgentExecutor(CerebrasNextActionExecutor):
                         "Parsed private plan",
                         raw_preview=plan_result.text[:500],
                         plan_summary=_summarize_private_plan(private_plan),
+                        planner_model=plan_result.model,
+                        planner_reasoning_effort=self.planner_reasoning_effort,
+                        planner_finish_reason=plan_result.finish_reason,
                         planner_ms=round(planner_ms, 1),
+                        planner_estimated_request_tokens=(
+                            plan_result.estimated_request_tokens
+                        ),
+                        planner_cerebras_rate_limit_headers=(
+                            plan_result.rate_limit_headers.as_dict()
+                            if plan_result.rate_limit_headers is not None
+                            else None
+                        ),
                     )
 
                 executor_prompt = build_executor_prompt(
@@ -180,6 +223,7 @@ class PlannerExecutorCARBenchAgentExecutor(CerebrasNextActionExecutor):
                     planner_called=planner_ms > 0,
                     prompt_chars=len(executor_prompt),
                     max_completion_tokens=self.executor_max_completion_tokens,
+                    reasoning_effort=self.executor_reasoning_effort,
                 )
                 executor_result = self.client.generate(
                     model=self.executor_model,
@@ -193,8 +237,13 @@ class PlannerExecutorCARBenchAgentExecutor(CerebrasNextActionExecutor):
                     response_schema=NEXT_ACTION_OUTPUT_SCHEMA,
                     response_schema_name="next_action",
                     max_completion_tokens=self.executor_max_completion_tokens,
-                    temperature=self.temperature,
+                    temperature=self.executor_temperature,
+                    reasoning_effort=self.executor_reasoning_effort,
                 )
+                last_model_stage = "executor"
+                last_model_text = executor_result.text
+                last_finish_reason = executor_result.finish_reason
+                last_token_usage = executor_result.token_usage
                 internal_call_count += 1
                 total_duration_ms += executor_result.duration_ms
                 total_cost += executor_result.cost
@@ -202,6 +251,7 @@ class PlannerExecutorCARBenchAgentExecutor(CerebrasNextActionExecutor):
                     total_token_usage,
                     executor_result.token_usage,
                 )
+                total_quota_wait_ms += executor_result.quota_wait_ms
                 parsed = parse_next_action(executor_result.text)
                 if parsed["action"] == "respond":
                     self._active_private_plans_by_context.pop(context_id, None)
@@ -216,6 +266,9 @@ class PlannerExecutorCARBenchAgentExecutor(CerebrasNextActionExecutor):
                     planner_called=planner_ms > 0,
                     planner_model=self.planner_model,
                     executor_model=executor_result.model,
+                    planner_reasoning_effort=self.planner_reasoning_effort,
+                    executor_reasoning_effort=self.executor_reasoning_effort,
+                    executor_finish_reason=executor_result.finish_reason,
                     planner_ms=round(planner_ms, 1),
                     executor_ms=round(executor_result.duration_ms, 1),
                     total_inference_ms=round(total_duration_ms, 1),
@@ -248,6 +301,7 @@ class PlannerExecutorCARBenchAgentExecutor(CerebrasNextActionExecutor):
                         else 0
                     ),
                     attempt=attempt + 1,
+                    quota_wait_ms=round(total_quota_wait_ms, 1),
                 )
                 return AgentInferenceResult(
                     next_action=parsed,
@@ -255,6 +309,7 @@ class PlannerExecutorCARBenchAgentExecutor(CerebrasNextActionExecutor):
                     token_usage=total_token_usage,
                     cost=total_cost,
                     internal_calls=max(internal_call_count, 1),
+                    quota_wait_ms=total_quota_wait_ms,
                 )
             except (MalformedModelResponseError, json.JSONDecodeError) as exc:
                 last_error = exc
@@ -263,14 +318,37 @@ class PlannerExecutorCARBenchAgentExecutor(CerebrasNextActionExecutor):
                     "The previous planner/executor output was invalid. Return "
                     f"strict JSON matching the requested schema. Error: {exc}"
                 )
+                warning_message = (
+                    "Malformed planner/executor response"
+                    f" | stage={last_model_stage}"
+                    f" | attempt={attempt + 1}"
+                    f" | retrying={attempt < self.malformed_retries}"
+                    f" | finish_reason={last_finish_reason or 'unknown'}"
+                    f" | output_chars={len(last_model_text)}"
+                    f" | error={exc}"
+                )
                 ctx_logger.warning(
-                    "Malformed planner/executor response",
+                    warning_message,
                     attempt=attempt + 1,
                     retrying=attempt < self.malformed_retries,
                     plan_source=plan_source,
+                    stage=last_model_stage,
+                    finish_reason=last_finish_reason,
+                    output_chars=len(last_model_text),
+                    token_usage=(
+                        last_token_usage.__dict__
+                        if last_token_usage is not None
+                        else None
+                    ),
                     error=str(exc),
                 )
-            except LiteLLMTemplateError:
+                ctx_logger.debug(
+                    "Malformed planner/executor raw output preview",
+                    stage=last_model_stage,
+                    finish_reason=last_finish_reason,
+                    raw_preview=last_model_text[:1000],
+                )
+            except CerebrasTemplateError:
                 raise
 
         raise MalformedModelResponseError(
@@ -283,7 +361,7 @@ class PlannerExecutorCARBenchAgentExecutor(CerebrasNextActionExecutor):
         context_id: str,
         elapsed_ms: float,
         *,
-        token_usage: LiteLLMTokenUsage | None = None,
+        token_usage: TokenUsage | None = None,
         cost: float = 0.0,
         internal_calls: int | None = None,
         quota_wait_ms: float = 0.0,
@@ -343,6 +421,7 @@ def build_planner_prompt(
             "Do not ask the evaluator to execute planning_tool from this planner step.",
             "Do not invent observations; only actual tool results in the transcript are observations.",
             "Plan the full path from the latest user request through likely tool calls and final response.",
+            "Return at least one planning_tool step. Never return an empty steps array.",
             "Include enough guidance for the executor to continue after tool observations.",
             "The final plan step should verify whether all user intents can be resolved before responding.",
             "Keep the plan compact so the executor can use it quickly.",
