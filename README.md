@@ -94,7 +94,8 @@ tools directly.
 For serious participation, create a fork of this starter repository first, then
 clone your fork. That gives you a clean place for your agent code, Dockerfile,
 scenario configs, and technical-report notes. Official submission will still be
-a GHCR Docker image plus config, not a pull request to this repository.
+a public digest-pinned GHCR agent image plus `scenario.toml`, not a pull
+request to this repository.
 
 ```bash
 git clone https://github.com/YOUR_ORG_OR_USERNAME/car-bench-ijcai.git
@@ -336,15 +337,69 @@ hints when the scenario exposes them.
 
 ## Submission Instructions
 
-Detailed submission mechanics will be announced by the organizers. The expected
+The submission Google Form link will be announced by the organizers and added
+to the competition website before the official evaluation rounds. The expected
 submission shape is:
 
-1. A registered GHCR Docker image for your agent under test, preferably pinned
-   by digest. The image must be public or explicitly accessible to the
-   organizers.
-2. The scenario/config file needed to run that image.
-3. Required environment variable or secret names, excluding secret values.
-4. Track selection: Track 1, Track 2, or both.
+1. A public GHCR Docker image for your agent under test, pinned by digest.
+2. A `scenario.toml` file using the official evaluator image and your
+   agent-under-test image/config.
+3. Required and optional environment variable or secret names, excluding secret
+   values.
+4. Track selection: `track_1`, `track_2`, or `both`.
+5. A 4-page IJCAI-format technical report that cites CAR-bench. Use the
+   [IJCAI author kit](https://www.ijcai.org/authors_kit).
+
+All LLM model names, provider routes, deployment names, API bases, service
+tiers, and reasoning-effort selectors must be configurable through environment
+variables. Organizers may host models differently from your development setup.
+
+Use this copy-pasteable `scenario.toml` as a starting point:
+
+```toml
+[evaluator]
+image = "ghcr.io/car-bench/car-bench-evaluator:latest"
+
+[evaluator.env]
+GEMINI_API_KEY = "${GEMINI_API_KEY:?Set GEMINI_API_KEY}"
+LOGURU_LEVEL = "${LOGURU_LEVEL:-INFO}"
+
+[agent_under_test]
+image = "ghcr.io/your-org/your-agent@sha256:replace_with_digest"
+
+[agent_under_test.env]
+AGENT_LLM = "${AGENT_LLM:?Set AGENT_LLM}"
+AGENT_API_BASE = "${AGENT_API_BASE:-}"
+AGENT_API_KEY = "${AGENT_API_KEY:?Set AGENT_API_KEY}"
+AGENT_TEMPERATURE = "${AGENT_TEMPERATURE:-}"
+LOGURU_LEVEL = "${LOGURU_LEVEL:-INFO}"
+
+[config]
+num_trials = 3
+task_split = "hidden"
+tasks_base_num_tasks = -1
+tasks_hallucination_num_tasks = -1
+tasks_disambiguation_num_tasks = -1
+max_steps = 50
+```
+
+Field notes:
+
+- `[evaluator]` must use the official organizer-published evaluator image.
+  Participants do not submit, modify, or self-host evaluator images for
+  official evaluation.
+- `[evaluator.env]` may reference evaluator env var names, but organizers
+  provide evaluator secrets for official runs.
+- `[agent_under_test].image` must point to a public digest-pinned GHCR image,
+  not a mutable tag.
+- `[agent_under_test.env]` lists the env vars organizers must provide. Use
+  `${VAR:?message}` for required vars and `${VAR:-}` or `${VAR:-default}` for
+  optional vars. Do not include actual API keys, tokens, passwords, or secret
+  values.
+- `[config]` must use `task_split = "hidden"` for official submission and `-1`
+  for each task-count field so the full hidden set is selected.
+- Name environment variables however you want, but every model/provider choice
+  needed to run the agent must be configurable through env vars.
 
 The organizers will run submitted Docker agents and configs on controlled
 evaluation infrastructure. Final ranking is determined from hidden test set

@@ -31,6 +31,29 @@ Each directory contains the same six-file matrix:
 The public test-set scenarios are development validation only. Official final
 evaluation is run by the organizers on a hidden test set.
 
+## Submission Scenarios
+
+Final submission can reuse the same scenario TOML shape. Start from the
+matching `ghcr_test_set.toml`, replace the agent-under-test image with your
+public digest-pinned GHCR image, keep the official evaluator image, and change
+the config to the hidden split:
+
+```toml
+[config]
+num_trials = 3
+task_split = "hidden"
+tasks_base_num_tasks = -1
+tasks_hallucination_num_tasks = -1
+tasks_disambiguation_num_tasks = -1
+max_steps = 50
+```
+
+The submitted scenario should list env var names through Compose-style
+interpolation, but must not contain secret values. Organizers provide the
+official evaluator runtime and secrets; participants submit only the
+agent-under-test image/config needed to run their agent through the official
+evaluator boundary.
+
 ## TOML Structure
 
 Every scenario has three main tables:
