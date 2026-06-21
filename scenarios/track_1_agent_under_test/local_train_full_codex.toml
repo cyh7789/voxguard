@@ -1,0 +1,22 @@
+# Full TRAIN set (129 tasks) via Codex proxy — free.
+
+[evaluator]
+endpoint = "http://127.0.0.1:8081"
+cmd = "python src/evaluator/server.py --host 127.0.0.1 --port 8081"
+
+[agent_under_test]
+endpoint = "http://127.0.0.1:8080"
+cmd = "python src/track_1_agent_under_test/server.py --host 127.0.0.1 --port 8080 --agent-llm openai/gpt-5.4"
+
+[config]
+num_trials = 1
+task_split = "train"
+tasks_base_num_tasks = -1
+tasks_hallucination_num_tasks = -1
+tasks_disambiguation_num_tasks = -1
+max_steps = 50
+user_model = "openai/gpt-5.4"
+user_provider = "openai"
+user_thinking = false
+policy_evaluator_model = "openai/gpt-5.4"
+policy_evaluator_provider = "openai"
