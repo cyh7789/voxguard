@@ -71,6 +71,8 @@
 | 6/21 | v5 flash-lite | 30 | 100% | 90% | 50% | 80% | flash-lite disambiguation 弱 |
 | 6/21 | v5 GPT-5.4 low (Codex proxy) | 30 | 90% | 80% | 40% | **70%** | train set，免費走 Codex OAuth |
 | 6/22 | v5 GPT-5.4 high (Codex proxy) | 30 | **100%** | 80% | 70% | **83.3%** | high effort 大幅提升 disamb |
+| 6/22 | v5 GPT-5.4 high (Codex proxy) | 129 | 78% | 81% | 52% | **72.9%** | full train set baseline |
+| 6/22 | v7 GPT-5.4 high (Codex proxy) | 30 | **100%** | 80% | 70% | **83.3%** | +policy rules, +QUERY/ACTION, +concise |
 
 ### Baseline 對比
 
@@ -79,6 +81,26 @@
 | Claude Opus 4.6 (baseline) | .80 | .48 | .46 | **.58** |
 | GPT-5 (baseline) | .66 | .60 | .36 | .54 |
 | **VoxGuard + flash (ours)** | **1.00** | **.70** | **.90** | **~.87** |
+
+### v5 → v7 改善分析（GPT-5.4 high, 30 題）
+
+v7 新增：policy 規則注入（AUT-POL 005-018）、QUERY vs ACTION 工具區分、簡潔回應規則。
+
+- **Policy 全過**：v7 所有 30 題 r_policy=1.0（v5 有部分 policy 違規）
+- **disamb_6 修好**：不再主動報告未被問到的設備狀態（簡潔回應規則生效）
+- **evaluator 隨機性**：hall_5/hall_8 持續被 GPT-5.4 evaluator 誤判為 HALLUCINATION_ERROR
+- **disamb 新掉 2 題**：evaluator DISAMBIGUATION_ERROR，不是 agent 問題
+- **結論**：30 題樣本太小，evaluator 隨機性蓋過改善效果。真正差別在 129 題的 12 題 policy 違規
+
+### 失敗分析（GPT-5.4 high, 129 題, v5 prompt）
+
+| 類別 | 數量 | 佔比 | 說明 |
+|------|------|------|------|
+| Evaluator 誤判 | 9 | 26% | GPT-5.4 evaluator 判 HALLUCINATION_ERROR |
+| Policy 違規 | 12 | 34% | 溫度沒標攝氏、路線沒問替代、操作前沒查狀態 |
+| Wrong actions | 9 | 26% | 複雜多步驟任務（導航、天氣條件判斷） |
+| Missing tool | 4 | 11% | agent 承諾能做但工具不在 |
+| Mixed | 1 | 3% | — |
 
 ### 失敗分析（GPT-5.4 high, 30 題, v5 prompt）
 
