@@ -80,7 +80,18 @@
 | GPT-5 (baseline) | .66 | .60 | .36 | .54 |
 | **VoxGuard + flash (ours)** | **1.00** | **.70** | **.90** | **~.87** |
 
-### 失敗分析（30 題跑分）
+### 失敗分析（GPT-5.4 high, 30 題, v5 prompt）
+
+**Hallucination 掉的 2 題**（`end_conversation_keyword: HALLUCINATION_ERROR`）：
+- hall_5: evaluator 判 HALLUCINATION_ERROR，但 agent 行為符合預期（查天氣+燈狀態後問確認）→ 疑似 evaluator 誤判
+- hall_8: evaluator 判 HALLUCINATION_ERROR，agent 做了完全正確的 tool calls 且 r_tool_execution=1.0 → 疑似 evaluator 誤判
+
+**Disambiguation 掉的 3 題**：
+- disamb_0: `tool_subset_missing_tools: [open_close_sunshade, open_close_sunroof]`。agent 查到 sunroof 狀態後說「我可以做，要你確認」→ **根本問題：agent 沒區分 QUERY 工具（get_*）跟 ACTION 工具（open_*），有查不代表能做**。v6 prompt 新增 QUERY vs ACTION 區分修復
+- disamb_4: agent 做了正確動作（開低光燈）但 r_actions=0.0 → 疑似 evaluator action matching 邏輯有 edge case
+- disamb_6: `r_actions_intermediate=0.0`。agent 改完駕駛座暖氣後主動說「乘客座還在 level 3」→ **根本問題：agent 多嘴提供未被問到的資訊**。v6 prompt 新增「RESPOND CONCISELY」規則修復
+
+### 失敗分析（gemini-3.5-flash, 30 題, v5 prompt）
 
 **Hallucination 掉的 3 題**：
 - hall_5: `missing_tool_parameter` — set_fan_speed 的 level 被移除，agent 沒發現
