@@ -57,7 +57,7 @@ SYSTEM_PROMPT = """You are a reliable car voice assistant. Your top priorities, 
    - When choosing a route for the user without explicit preference, pick the fastest route AND mention it was chosen as the fastest. Ask if they want to see alternative routes.
 
    COMMUNICATION:
-   - Always use "degrees Celsius" (not just "degrees") when reporting temperatures.
+   - ALWAYS say "degrees Celsius" — NEVER just "degrees". Wrong: "22 degrees". Correct: "22 degrees Celsius". This applies to EVERY temperature mention in EVERY response.
    - Before high-impact actions (sending email, setting high beams), list the exact parameters you intend to use and get explicit confirmation.
 
    If a request conflicts with any policy, refuse and explain why.
@@ -87,10 +87,11 @@ SYSTEM_PROMPT = """You are a reliable car voice assistant. Your top priorities, 
    Types of missing capabilities to watch for:
    a) Missing tool: the ACTION tool doesn't exist in your list → refuse immediately, don't search for alternatives
    b) Missing parameter: a tool exists but a required parameter is not available or was removed → tell the user you can't configure that specific setting
-   c) Missing response field / "unknown" values → STOP, do not act on that field:
-      - "unknown" means the data is unavailable — do NOT set/change something whose current state is "unknown"
-      - Example: high_beams = "unknown" → do NOT call set_head_lights_high_beams, tell the user the status is unavailable
-      - Example: window_position = "unknown" → do NOT close that specific window, tell the user you can't determine its position
+   c) Missing response field / "unknown" values — ALWAYS acknowledge them to the user:
+      - When ANY field returns "unknown", you MUST mention it in your response: "The [field] status is reported as unknown."
+      - For SAFETY-FIRST actions (turning something OFF, closing windows), you MAY proceed but MUST acknowledge: "The high beam status is unknown, but I'll make sure they're off as a safety precaution."
+      - For READING a value to make a decision, you CANNOT proceed — tell the user the information is unavailable
+      - NEVER silently ignore "unknown" fields — the user must know what information was unavailable
 
 3. CLARIFY ONLY WHEN TRULY AMBIGUOUS — do NOT over-ask:
    - FIRST check current state using available query tools (e.g., get_exterior_lights_status)
@@ -268,6 +269,29 @@ class CARBenchAgentExecutor(AgentExecutor):
 
             # Add all tool result messages
             messages.extend(tool_results)
+
+            # Detect "unknown" values in tool results and inject reminder
+            unknown_fields = []
+            for tr in tool_results:
+                content = tr.get("content", "")
+                if '"unknown"' in content:
+                    try:
+                        parsed = json.loads(content)
+                        result = parsed.get("result", parsed)
+                        if isinstance(result, dict):
+                            for k, v in result.items():
+                                if v == "unknown":
+                                    unknown_fields.append(k)
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
+            if unknown_fields:
+                reminder = (
+                    f"[SYSTEM REMINDER] The following fields returned 'unknown': {', '.join(unknown_fields)}. "
+                    f"You MUST mention these unknown fields to the user in your response. "
+                    f"Do NOT silently ignore them."
+                )
+                messages.append({"role": "user", "content": reminder})
+                ctx_logger.info("Injected unknown-field reminder", fields=unknown_fields)
 
             ctx_logger.debug(
                 "Formatted tool results",
