@@ -454,6 +454,28 @@ class CARBenchAgentExecutor(AgentExecutor):
                 reasoning_content=assistant_content.get("reasoning_content")
             )
 
+            # --- GUARD: Celsius enforcement ---
+            import re
+            content_text = assistant_content.get("content") or ""
+            if not tool_calls and content_text:
+                # Check for temperature mentions without "Celsius"
+                has_temp = bool(re.search(r'\b-?\d+\.?\d*\s*degrees?\b', content_text, re.IGNORECASE))
+                has_celsius = bool(re.search(r'\b-?\d+\.?\d*\s*degrees?\s*celsius\b', content_text, re.IGNORECASE))
+                if has_temp and not has_celsius:
+                    ctx_logger.info("Celsius missing in temperature mention — re-prompting")
+                    messages.append({"role": "assistant", "content": content_text})
+                    messages.append({"role": "user", "content": (
+                        "[SYSTEM] You mentioned a temperature without saying 'Celsius'. "
+                        "Rewrite your ENTIRE response, replacing every 'X degrees' with 'X degrees Celsius'. "
+                        "Keep everything else exactly the same."
+                    )})
+                    retry_response = completion(messages=messages, **completion_kwargs)
+                    llm_message = retry_response.choices[0].message
+                    assistant_content = llm_message.model_dump(exclude_unset=True)
+                    tool_calls = assistant_content.get("tool_calls")
+                    messages.pop()
+                    messages.pop()
+
             # Build proper A2A Message with Parts (protobuf)
             parts = []
 
