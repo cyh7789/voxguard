@@ -76,6 +76,7 @@
 | 6/22 | v7.3 GPT-5.4 high (Codex proxy) | 30 | **100%** | **100%** | 90% | **96.7%** | +unknown detection, +Celsius fix |
 | 6/22 | v7.3 GPT-5.4 high (Codex proxy) | 129 | 74% | **88%** | **65%** | **76.7%** | full train: hall+disamb up, base slight drop |
 | 6/22 | v7.3 GPT-5.5 high (Codex proxy) | 129 | **76%** | **90%** | **68%** | **79.1%** | 5.5 全維度勝 5.4，same prompt |
+| 6/22 | v7.3+C GPT-5.4 high (Codex proxy) | 129 | **80%** | **92%** | **71%** | **82.2%** | +Celsius guard, 9 次觸發救回 7 題 |
 
 ### Baseline 對比
 
