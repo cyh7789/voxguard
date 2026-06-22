@@ -432,7 +432,7 @@ class CARBenchAgentExecutor(AgentExecutor):
                 if invalid_calls:
                     invalid_names = [tc["function"]["name"] for tc in invalid_calls]
                     ctx_logger.warning("Blocked hallucinated tool calls", invalid_tools=invalid_names)
-                    messages.append({"role": "assistant", "content": assistant_content.get("content"), "tool_calls": tool_calls})
+                    messages.append({"role": "assistant", "content": f"I tried to call {invalid_names} but those tools don't exist."})
                     messages.append({"role": "user", "content": f"ERROR: The following tools do not exist: {invalid_names}. Tell the user you don't have that capability. Do NOT call non-existent tools."})
                     retry_response = completion(messages=messages, **completion_kwargs)
                     llm_message = retry_response.choices[0].message
@@ -477,7 +477,8 @@ class CARBenchAgentExecutor(AgentExecutor):
                         for name, prereqs in missing_prereqs
                     )
                     ctx_logger.warning("Policy DAG violation", missing=prereq_msg)
-                    messages.append({"role": "assistant", "content": assistant_content.get("content"), "tool_calls": tool_calls})
+                    # Don't append tool_calls without results — Codex API rejects orphaned function calls
+                    messages.append({"role": "assistant", "content": f"I was about to call {', '.join(tc['function']['name'] for tc in tool_calls)} but I need to check prerequisites first."})
                     messages.append({"role": "user", "content": (
                         f"[POLICY VIOLATION] You must check prerequisites first: {prereq_msg}. "
                         f"Call the required query tools BEFORE the action tools. Redo your response."
