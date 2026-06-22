@@ -102,7 +102,7 @@ SYSTEM_PROMPT = """You are a reliable car voice assistant. Your top priorities, 
      * Example: "turn on the lights" + visibility is poor → turn on low beams (the safe default)
      * Do NOT ask the user to choose when the current state makes the answer obvious
    - Only ask when there are genuinely MULTIPLE valid actions that cannot be resolved from context or current state
-   - Decision priority: policy > explicit user instruction > current device state > user preferences (get_user_preferences) > contextual inference > ask the user (LAST RESORT)
+   - Decision priority: policy > explicit user instruction > learned user preferences (get_user_preferences) > heuristic defaults > current device state / context > ask the user (LAST RESORT)
 
 4. VERIFY BEFORE EXECUTING:
    - Before calling a tool, confirm it exists in your available tool list
@@ -142,6 +142,9 @@ class CARBenchAgentExecutor(AgentExecutor):
         self.ctx_id_to_tools: dict[str, list[dict]] = {}
         # Per-context turn metrics accumulation (reset when final response is sent)
         self.ctx_id_to_turn_metrics: dict[str, dict] = {}
+        # VoxGuard Runtime: per-context tool call history and obligation tracking
+        self.ctx_id_to_called_tools: dict[str, list[str]] = {}
+        self.ctx_id_to_obligations: dict[str, list[str]] = {}
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         inbound_message = context.message
@@ -438,6 +441,54 @@ class CARBenchAgentExecutor(AgentExecutor):
                     messages.pop()
                     messages.pop()
 
+            # --- VoxGuard Runtime: ensure per-context state ---
+            if context.context_id not in self.ctx_id_to_called_tools:
+                self.ctx_id_to_called_tools[context.context_id] = []
+            if context.context_id not in self.ctx_id_to_obligations:
+                self.ctx_id_to_obligations[context.context_id] = []
+
+            # --- VoxGuard Runtime: Policy DAG pre-check ---
+            if tool_calls and tools:
+                history = self.ctx_id_to_called_tools[context.context_id]
+
+                # AUT-POL dependency rules: {tool -> required prior tools}
+                POLICY_DAG = {
+                    "set_air_conditioning": [["get_climate_settings", "get_vehicle_window_positions"]],
+                    "set_window_defrost": [["get_climate_settings"]],
+                    "set_fog_lights": [["get_exterior_lights_status"]],
+                    "set_head_lights_high_beams": [["get_exterior_lights_status"]],
+                    "open_close_sunroof": [["get_weather"]],
+                }
+
+                tool_names_this_step = [tc["function"]["name"] for tc in tool_calls]
+                all_called = history + tool_names_this_step
+                missing_prereqs = []
+
+                for tc in tool_calls:
+                    name = tc["function"]["name"]
+                    if name in POLICY_DAG:
+                        for prereq_group in POLICY_DAG[name]:
+                            if not any(p in all_called for p in prereq_group):
+                                missing_prereqs.append((name, prereq_group))
+
+                if missing_prereqs:
+                    prereq_msg = "; ".join(
+                        f"{name} requires calling {' or '.join(prereqs)} first"
+                        for name, prereqs in missing_prereqs
+                    )
+                    ctx_logger.warning("Policy DAG violation", missing=prereq_msg)
+                    messages.append({"role": "assistant", "content": assistant_content.get("content"), "tool_calls": tool_calls})
+                    messages.append({"role": "user", "content": (
+                        f"[POLICY VIOLATION] You must check prerequisites first: {prereq_msg}. "
+                        f"Call the required query tools BEFORE the action tools. Redo your response."
+                    )})
+                    retry_response = completion(messages=messages, **completion_kwargs)
+                    llm_message = retry_response.choices[0].message
+                    assistant_content = llm_message.model_dump(exclude_unset=True)
+                    tool_calls = assistant_content.get("tool_calls")
+                    messages.pop()
+                    messages.pop()
+
             ctx_logger.info(
                 "LLM response received",
                 has_tool_calls=bool(tool_calls),
@@ -453,6 +504,37 @@ class CARBenchAgentExecutor(AgentExecutor):
                 tool_calls=[{"name": tc["function"]["name"], "args": tc["function"]["arguments"]} for tc in tool_calls] if tool_calls else None,
                 reasoning_content=assistant_content.get("reasoning_content")
             )
+
+            # --- VoxGuard Runtime: Obligation tracking ---
+            called = self.ctx_id_to_called_tools[context.context_id]
+            obligations = self.ctx_id_to_obligations[context.context_id]
+
+            # Record tool calls from this turn
+            if tool_calls:
+                for tc in tool_calls:
+                    called.append(tc["function"]["name"])
+
+            # Detect route-selection obligations
+            route_tools = {"set_new_navigation", "navigation_replace_final_destination",
+                          "navigation_replace_one_waypoint", "navigation_add_one_waypoint",
+                          "navigation_delete_one_waypoint", "navigation_delete_destination"}
+            if tool_calls and any(tc["function"]["name"] in route_tools for tc in tool_calls):
+                if "ASK_ROUTE_ALTERNATIVES" not in obligations:
+                    obligations.append("ASK_ROUTE_ALTERNATIVES")
+
+            # Fulfill obligations in final text response
+            content_text = assistant_content.get("content") or ""
+            if not tool_calls and content_text and obligations:
+                appended = []
+                if "ASK_ROUTE_ALTERNATIVES" in obligations:
+                    alt_phrases = ["alternative", "other route", "different route", "other option"]
+                    if not any(p in content_text.lower() for p in alt_phrases):
+                        appended.append("Would you like to see alternative routes?")
+                        ctx_logger.info("Obligation fulfilled: ASK_ROUTE_ALTERNATIVES (auto-appended)")
+                    obligations.remove("ASK_ROUTE_ALTERNATIVES")
+
+                if appended:
+                    assistant_content["content"] = content_text.rstrip() + "\n\n" + " ".join(appended)
 
             # --- GUARD: Celsius enforcement ---
             import re
@@ -510,7 +592,8 @@ class CARBenchAgentExecutor(AgentExecutor):
             )
 
         except Exception as e:
-            logger.error(f"LLM error: {e}")
+            import traceback
+            logger.error(f"LLM error: {e}\n{traceback.format_exc()}")
             # Error response as Parts
             parts = [new_text_part(f"Error processing request: {str(e)}")]
             # Create a simple assistant_content for error case
