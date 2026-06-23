@@ -55,6 +55,21 @@ SYSTEM_PROMPT = """You are a reliable car voice assistant. Your top priorities, 
    NAVIGATION:
    - Only call ONE navigation editing tool per step (do NOT call navigation_add_one_waypoint and navigation_delete_one_waypoint in the same step — do them sequentially).
    - When choosing a route for the user without explicit preference, pick the fastest route AND mention it was chosen as the fastest. Ask if they want to see alternative routes.
+   - NAVIGATION API SEMANTICS — understand what each tool does:
+     * navigation_delete_destination: removes the FINAL destination. The previous waypoint automatically becomes the new final destination. Use this to shorten a route.
+     * navigation_delete_waypoint: removes an INTERMEDIATE waypoint. You must provide route_id_without_waypoint (the direct route bypassing the deleted waypoint).
+     * navigation_replace_final_destination: changes the final destination to a new one. Use this when the user wants to go somewhere DIFFERENT, not add_waypoint.
+     * navigation_add_one_waypoint: adds an intermediate stop. Do NOT use this when the user wants to CHANGE the destination — use replace instead.
+     * set_new_navigation: ONLY works when navigation is INACTIVE. If navigation is already active, use editing tools (replace/delete/add) instead.
+   - ROUTE SELECTION STRATEGY: When multiple routes exist and the user hasn't stated a preference, present ALL available routes FIRST and let the user choose. Do NOT set navigation to the fastest route and then ask — set it only ONCE with the user's chosen route.
+   - SMALL/OBSCURE LOCATIONS: For very small towns, villages, parishes, or hamlets (e.g., Ordino, La Massana, Canillo), the navigation system may not have them. Before calling get_location_id_by_location_name, consider whether the location is a well-known city. If it's a small or obscure location, ask the user first: "That's a small location that might not be in my navigation system. Would you like me to try the nearest major city instead (e.g., [suggest capital or nearby city])?" This avoids a failed lookup.
+   - WEATHER FOR REMOTE LOCATIONS — MANDATORY SEQUENCE:
+     * Step 1: Call get_routes_from_start_to_destination to get the route duration
+     * Step 2: Add the route duration to the current time to compute arrival time
+     * Step 3: Call get_weather with the ARRIVAL time (time_hour_24hformat = arrival hour)
+     * NEVER check weather at the current time for a remote destination — the weather may be different when you arrive
+     * Example: Current time 16:00, drive takes 3 hours → check weather at 19:00, not 16:00
+     * This is ESPECIALLY important for conditional navigation ("if it rains in X, go to Y instead")
 
    COMMUNICATION:
    - ALWAYS say "degrees Celsius" — NEVER just "degrees". Wrong: "22 degrees". Correct: "22 degrees Celsius". This applies to EVERY temperature mention in EVERY response.
@@ -99,8 +114,13 @@ SYSTEM_PROMPT = """You are a reliable car voice assistant. Your top priorities, 
    - INFERENCE RULE: When a user requests something generic and you check the current state:
      * If only ONE option makes sense given the current state → do it immediately
      * Example: "turn on the beams" + low beams already ON + high beams OFF → turn on high beams
-     * Example: "turn on the lights" + visibility is poor → turn on low beams (the safe default)
      * Do NOT ask the user to choose when the current state makes the answer obvious
+   - LIGHTS DISAMBIGUATION: When the user says "turn on the lights" ambiguously:
+     * FIRST call get_weather AND get_exterior_lights_status to check conditions
+     * Fog, mist, reduced visibility → turn on fog lights (set_fog_lights)
+     * Dark conditions, low beams already on → turn on high beams
+     * Normal conditions, no lights on → turn on low beams
+     * NEVER skip the weather/light status check for ambiguous light requests
    - Only ask when there are genuinely MULTIPLE valid actions that cannot be resolved from context or current state
    - Decision priority: policy > explicit user instruction > learned user preferences (get_user_preferences) > heuristic defaults > current device state / context > ask the user (LAST RESORT)
 
@@ -116,6 +136,7 @@ SYSTEM_PROMPT = """You are a reliable car voice assistant. Your top priorities, 
 6. RESPOND CONCISELY — answer ONLY what was asked:
    - Do NOT volunteer information about settings the user did not mention
    - Do NOT proactively report the status of unrelated devices or zones
+   - Do NOT perform extra actions the user didn't request — if asked to "close windows and turn on defrost", do EXACTLY those two things. Do NOT also turn on AC, change fan airflow direction, or adjust other climate settings unless the user explicitly asked or a safety policy requires it
    - Example: If asked to lower driver seat heating, confirm you did it. Do NOT add "Passenger seat is still at level 3" unless asked
    - Keep responses short and focused on the completed action
 
@@ -145,6 +166,12 @@ class CARBenchAgentExecutor(AgentExecutor):
         # VoxGuard Runtime: per-context tool call history and obligation tracking
         self.ctx_id_to_called_tools: dict[str, list[str]] = {}
         self.ctx_id_to_obligations: dict[str, list[str]] = {}
+        # VoxGuard Runtime: per-context route duration cache (for weather ETA rewriting)
+        self.ctx_id_to_route_durations: dict[str, dict] = {}  # {ctx_id: {destination_id: duration_minutes}}
+        # VoxGuard Runtime: per-context first user message (for guards that need original intent)
+        self.ctx_id_to_first_user_msg: dict[str, str] = {}
+        # VoxGuard Runtime: per-context ETA rewrite tracking (prevent loops)
+        self.ctx_id_to_eta_rewritten: dict[str, bool] = {}
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         inbound_message = context.message
@@ -273,6 +300,46 @@ class CARBenchAgentExecutor(AgentExecutor):
             # Add all tool result messages
             messages.extend(tool_results)
 
+            # Track confirmed locations from successful lookups
+            if not hasattr(self, 'ctx_id_to_confirmed_locations'):
+                self.ctx_id_to_confirmed_locations = {}
+            if context.context_id not in self.ctx_id_to_confirmed_locations:
+                self.ctx_id_to_confirmed_locations[context.context_id] = set()
+            for tr in tool_results:
+                content = tr.get("content", "")
+                if '"id":' in content and "get_location" in str(prev_tool_calls):
+                    try:
+                        parsed = json.loads(content)
+                        if parsed.get("status") == "SUCCESS":
+                            # Find the location name from the corresponding tool call
+                            for ptc in prev_tool_calls:
+                                if ptc["function"]["name"] == "get_location_id_by_location_name":
+                                    loc_args = json.loads(ptc["function"]["arguments"])
+                                    self.ctx_id_to_confirmed_locations[context.context_id].add(
+                                        loc_args.get("location", "")
+                                    )
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+            # Extract route durations from tool results for Weather ETA rewriting
+            if context.context_id not in self.ctx_id_to_route_durations:
+                self.ctx_id_to_route_durations[context.context_id] = {}
+            for tr in tool_results:
+                content = tr.get("content", "")
+                if "routes" in content and "duration_hours" in content:
+                    try:
+                        parsed = json.loads(content)
+                        routes = parsed.get("result", {}).get("routes", [])
+                        for route in routes:
+                            dest_id = route.get("destination_id", "")
+                            dur_h = route.get("duration_hours", 0)
+                            dur_m = route.get("duration_minutes", 0)
+                            total_minutes = int(dur_h) * 60 + int(dur_m)
+                            if dest_id and total_minutes > 0:
+                                self.ctx_id_to_route_durations[context.context_id][dest_id] = total_minutes
+                    except (json.JSONDecodeError, AttributeError, TypeError):
+                        pass
+
             # Detect "unknown" values in tool results and inject reminder
             unknown_fields = []
             for tr in tool_results:
@@ -304,6 +371,9 @@ class CARBenchAgentExecutor(AgentExecutor):
         else:
             # Regular user message
             messages.append({"role": "user", "content": user_message_text})
+            # Track first user message for guards that need original intent
+            if context.context_id not in self.ctx_id_to_first_user_msg and user_message_text:
+                self.ctx_id_to_first_user_msg[context.context_id] = user_message_text
 
         # Call LLM with native tool calling
         try:
@@ -447,6 +517,83 @@ class CARBenchAgentExecutor(AgentExecutor):
             if context.context_id not in self.ctx_id_to_obligations:
                 self.ctx_id_to_obligations[context.context_id] = []
 
+
+            # --- VoxGuard Runtime: Route type guard for search_poi_along_the_route ---
+            # This tool only supports location→location routes (rll_ prefix).
+            # Filter out calls with POI-related routes (rlp_, rpl_) to avoid fatal errors.
+            if tool_calls:
+                filtered_poi_calls = []
+                poi_blocked = False
+                for tc in tool_calls:
+                    if tc["function"]["name"] == "search_poi_along_the_route":
+                        try:
+                            args = json.loads(tc["function"]["arguments"])
+                            route_id = args.get("route_id", "")
+                            if not route_id.startswith("rll_"):
+                                ctx_logger.warning(
+                                    "Route type guard: blocked search_poi on non-rll route",
+                                    route_id=route_id,
+                                )
+                                poi_blocked = True
+                                continue
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    filtered_poi_calls.append(tc)
+                if poi_blocked:
+                    tool_calls = filtered_poi_calls if filtered_poi_calls else None
+                    if tool_calls:
+                        assistant_content["tool_calls"] = tool_calls
+                    elif not assistant_content.get("content"):
+                        assistant_content["content"] = "I can only search for points of interest along a main route, not along route segments to or from a charging station."
+
+            # --- VoxGuard Runtime: Capability Firewall ---
+            # Positive whitelist: if a semantic capability requires a specific tool
+            # that's missing, refuse instead of allowing LLM to use workaround tools.
+            if tool_calls and tools:
+                available_tool_names = {t["function"]["name"] for t in tools}
+                proposed_names = {tc["function"]["name"] for tc in tool_calls}
+
+                CAPABILITY_CONTRACTS = {
+                    "navigation_delete_destination": {
+                        "substitution_tools": {"navigation_delete_waypoint", "navigation_replace_final_destination",
+                                               "navigation_replace_one_waypoint", "navigation_add_one_waypoint",
+                                               "set_new_navigation", "delete_current_navigation"},
+                        "refusal": "I'm unable to remove a destination from the route because I don't have the tool to delete a navigation destination.",
+                    },
+                    "navigation_replace_final_destination": {
+                        "substitution_tools": {"navigation_add_one_waypoint", "navigation_delete_destination",
+                                               "set_new_navigation", "delete_current_navigation"},
+                        "refusal": "I'm unable to change the final destination because the tool to replace it isn't available to me right now.",
+                    },
+                    "navigation_delete_waypoint": {
+                        "substitution_tools": {"navigation_delete_destination", "navigation_replace_final_destination",
+                                               "navigation_replace_one_waypoint", "set_new_navigation",
+                                               "delete_current_navigation"},
+                        "refusal": "I'm unable to remove an intermediate stop from the route because the tool to delete a waypoint isn't available to me right now.",
+                    },
+                    "set_fog_lights": {
+                        "substitution_tools": {"set_head_lights_low_beams", "set_head_lights_high_beams"},
+                        "refusal": "I'm unable to control the fog lights because that tool isn't available to me right now.",
+                    },
+                    "get_exterior_lights_status": {
+                        "substitution_tools": set(),
+                        "refusal": "I'm unable to check the current light status because that tool isn't available to me right now.",
+                    },
+                }
+
+                for required_tool, contract in CAPABILITY_CONTRACTS.items():
+                    if required_tool not in available_tool_names:
+                        substitution_tools = contract["substitution_tools"] & proposed_names
+                        if substitution_tools:
+                            ctx_logger.warning(
+                                "Capability firewall: blocked substitution",
+                                missing_tool=required_tool,
+                                blocked_substitutions=list(substitution_tools),
+                            )
+                            assistant_content = {"content": contract["refusal"]}
+                            tool_calls = None
+                            break
+
             # --- VoxGuard Runtime: Policy DAG pre-check ---
             if tool_calls and tools:
                 history = self.ctx_id_to_called_tools[context.context_id]
@@ -456,9 +603,99 @@ class CARBenchAgentExecutor(AgentExecutor):
                     "set_air_conditioning": [["get_climate_settings", "get_vehicle_window_positions"]],
                     "set_window_defrost": [["get_climate_settings"]],
                     "set_fog_lights": [["get_exterior_lights_status"]],
+                    "set_head_lights_low_beams": [["get_weather", "get_exterior_lights_status"]],
                     "set_head_lights_high_beams": [["get_exterior_lights_status"]],
                     "open_close_sunroof": [["get_weather"]],
+                    "set_fan_speed": [["get_climate_settings"]],
+                    "set_fan_airflow_direction": [["get_climate_settings"]],
                 }
+
+                # Weather ETA Rewriter: for conditional navigation scenarios,
+                # rewrite get_weather time to use arrival time instead of current time.
+                # Only triggers once per context to prevent loops.
+                eta_already_rewritten = self.ctx_id_to_eta_rewritten.get(context.context_id, False)
+                if tool_calls and not eta_already_rewritten and any(tc["function"]["name"] == "get_weather" for tc in tool_calls):
+                    route_durations = self.ctx_id_to_route_durations.get(context.context_id, {})
+                    has_route_this_step = any(
+                        tc["function"]["name"] == "get_routes_from_start_to_destination"
+                        for tc in tool_calls
+                    )
+
+                    if route_durations:
+                        # We have route duration data — rewrite weather time to ETA
+                        for tc in tool_calls:
+                            if tc["function"]["name"] == "get_weather":
+                                try:
+                                    args = json.loads(tc["function"]["arguments"])
+                                    weather_loc = args.get("location_or_poi_id", "")
+                                    # Check if weather location matches a known route destination
+                                    dest_duration = route_durations.get(weather_loc)
+                                    if dest_duration is None:
+                                        # Try matching by location prefix (loc_man → any route to Mannheim)
+                                        for dest_id, dur in route_durations.items():
+                                            if weather_loc[:7] == dest_id[:7]:
+                                                dest_duration = dur
+                                                break
+                                    if dest_duration and dest_duration > 30:
+                                        # Compute arrival time
+                                        current_hour = args.get("time_hour_24hformat", 0)
+                                        current_min = args.get("time_minutes", 0)
+                                        total_min = int(current_hour) * 60 + int(current_min) + dest_duration
+                                        arrival_hour = (total_min // 60) % 24
+                                        arrival_min = total_min % 60
+                                        arrival_day = args.get("day", 1)
+                                        if total_min >= 24 * 60:
+                                            arrival_day += 1
+                                        args["time_hour_24hformat"] = arrival_hour
+                                        args["time_minutes"] = arrival_min
+                                        args["day"] = arrival_day
+                                        tc["function"]["arguments"] = json.dumps(args)
+                                        self.ctx_id_to_eta_rewritten[context.context_id] = True
+                                        ctx_logger.info(
+                                            "Weather ETA rewriter: rewrote time to arrival",
+                                            original_hour=current_hour,
+                                            arrival_hour=arrival_hour,
+                                            duration_min=dest_duration,
+                                        )
+                                except (json.JSONDecodeError, TypeError):
+                                    pass
+                    elif has_route_this_step:
+                        # Route and weather in same step — strip weather, let route complete first
+                        filtered_calls = [tc for tc in tool_calls if tc["function"]["name"] != "get_weather"]
+                        if filtered_calls:
+                            ctx_logger.warning("Weather ETA guard: stripped get_weather, route must complete first")
+                            tool_calls = filtered_calls
+                            assistant_content["tool_calls"] = filtered_calls
+                    elif not route_durations:
+                        # No route info at all — check if conditional nav scenario
+                        # Use first user message since tool-result turns have no user text
+                        first_msg = self.ctx_id_to_first_user_msg.get(context.context_id, "")
+                        check_text = user_message_text or first_msg
+                        is_conditional = check_text and any(
+                            kw in check_text.lower()
+                            for kw in ["if it", "if not", "navigate", "charging", "drive to",
+                                       "rain", "weather", "raining"]
+                        )
+                        if is_conditional:
+                            # Strip weather, re-prompt to get route first
+                            filtered_calls = [tc for tc in tool_calls if tc["function"]["name"] != "get_weather"]
+                            if filtered_calls:
+                                ctx_logger.warning("Weather ETA guard: stripped get_weather, need route first")
+                                tool_calls = filtered_calls
+                                assistant_content["tool_calls"] = filtered_calls
+                            else:
+                                ctx_logger.warning("Weather ETA guard: re-prompting for route first")
+                                messages.append({"role": "assistant", "content": "I need to check the route first to determine the arrival time."})
+                                messages.append({"role": "user", "content": (
+                                    "[SYSTEM] Before checking weather for a remote destination, FIRST call "
+                                    "get_routes_from_start_to_destination. Then use arrival time for get_weather."
+                                )})
+                                retry_response = completion(messages=messages, **completion_kwargs)
+                                llm_message = retry_response.choices[0].message
+                                assistant_content = llm_message.model_dump(exclude_unset=True)
+                                tool_calls = assistant_content.get("tool_calls")
+                                messages.pop()
+                                messages.pop()
 
                 tool_names_this_step = [tc["function"]["name"] for tc in tool_calls]
                 all_called = history + tool_names_this_step
@@ -518,15 +755,29 @@ class CARBenchAgentExecutor(AgentExecutor):
             # Detect route-selection obligations
             route_tools = {"set_new_navigation", "navigation_replace_final_destination",
                           "navigation_replace_one_waypoint", "navigation_add_one_waypoint",
-                          "navigation_delete_one_waypoint", "navigation_delete_destination"}
+                          "navigation_delete_one_waypoint", "navigation_delete_destination",
+                          "navigation_delete_waypoint"}
             if tool_calls and any(tc["function"]["name"] in route_tools for tc in tool_calls):
                 if "ASK_ROUTE_ALTERNATIVES" not in obligations:
                     obligations.append("ASK_ROUTE_ALTERNATIVES")
+                if "DISCLOSE_ROUTE_CHOICE" not in obligations:
+                    obligations.append("DISCLOSE_ROUTE_CHOICE")
 
             # Fulfill obligations in final text response
             content_text = assistant_content.get("content") or ""
             if not tool_calls and content_text and obligations:
+                prepended = []
                 appended = []
+
+                if "DISCLOSE_ROUTE_CHOICE" in obligations:
+                    fastest_phrases = ["fastest route", "fastest option", "quickest route",
+                                      "chose the fastest", "selected the fastest", "set the fastest",
+                                      "picked the fastest"]
+                    if not any(p in content_text.lower() for p in fastest_phrases):
+                        prepended.append("I selected the fastest route.")
+                        ctx_logger.info("Obligation fulfilled: DISCLOSE_ROUTE_CHOICE (auto-prepended)")
+                    obligations.remove("DISCLOSE_ROUTE_CHOICE")
+
                 if "ASK_ROUTE_ALTERNATIVES" in obligations:
                     alt_phrases = ["alternative", "other route", "different route", "other option"]
                     if not any(p in content_text.lower() for p in alt_phrases):
@@ -534,8 +785,13 @@ class CARBenchAgentExecutor(AgentExecutor):
                         ctx_logger.info("Obligation fulfilled: ASK_ROUTE_ALTERNATIVES (auto-appended)")
                     obligations.remove("ASK_ROUTE_ALTERNATIVES")
 
-                if appended:
-                    assistant_content["content"] = content_text.rstrip() + "\n\n" + " ".join(appended)
+                if prepended or appended:
+                    text = content_text.rstrip()
+                    if prepended:
+                        text = " ".join(prepended) + " " + text
+                    if appended:
+                        text = text + "\n\n" + " ".join(appended)
+                    assistant_content["content"] = text
 
             # --- GUARD: Celsius enforcement ---
             import re
@@ -558,6 +814,44 @@ class CARBenchAgentExecutor(AgentExecutor):
                     tool_calls = assistant_content.get("tool_calls")
                     messages.pop()
                     messages.pop()
+
+            # --- GUARD: Promise check for missing capabilities ---
+            # If agent produces a text response that promises to do something,
+            # but key tools are missing, force a re-prompt to acknowledge limitations.
+            content_text = assistant_content.get("content") or ""
+            if not tool_calls and content_text and tools:
+                available_tool_names = {t["function"]["name"] for t in tools}
+                missing_critical = []
+                for tool_name in ["navigation_delete_destination", "navigation_delete_waypoint",
+                                  "navigation_replace_final_destination", "set_fog_lights",
+                                  "get_exterior_lights_status"]:
+                    if tool_name not in available_tool_names:
+                        missing_critical.append(tool_name)
+
+                if missing_critical:
+                    promise_phrases = ["i can do", "i can help", "yep, i can", "sure, i can",
+                                      "yes, i can", "i'll do", "i will do", "let me do",
+                                      "i can take care", "no problem"]
+                    has_promise = any(p in content_text.lower() for p in promise_phrases)
+                    if has_promise:
+                        ctx_logger.warning(
+                            "Promise check: agent promised capability but tools are missing",
+                            missing=missing_critical,
+                        )
+                        messages.append({"role": "assistant", "content": content_text})
+                        messages.append({"role": "user", "content": (
+                            f"[SYSTEM] STOP. The following tools are NOT available to you: {missing_critical}. "
+                            f"You just said you can do something, but you may not have all the tools needed. "
+                            f"Check which parts of the request you CANNOT fulfill due to missing tools, "
+                            f"and rewrite your response to clearly state what you CAN and CANNOT do. "
+                            f"Do NOT promise to do things you lack the tools for."
+                        )})
+                        retry_response = completion(messages=messages, **completion_kwargs)
+                        llm_message = retry_response.choices[0].message
+                        assistant_content = llm_message.model_dump(exclude_unset=True)
+                        tool_calls = assistant_content.get("tool_calls")
+                        messages.pop()
+                        messages.pop()
 
             # Build proper A2A Message with Parts (protobuf)
             parts = []
