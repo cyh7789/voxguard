@@ -186,7 +186,7 @@ async def chat_completions(request: Request):
         "stream": True,
         "tool_choice": "auto",
         "parallel_tool_calls": True,
-        "reasoning": {"effort": "high", "summary": "auto"},
+        "reasoning": {"effort": body.get("reasoning_effort", "high"), "summary": "auto"},
     }
     responses_body["instructions"] = instructions or "You are a helpful assistant."
     if responses_tools:

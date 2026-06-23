@@ -79,6 +79,7 @@
 | 6/22 | v7.3+C GPT-5.4 high (Codex proxy) | 129 | **80%** | **92%** | **71%** | **82.2%** | +Celsius guard, 9 次觸發救回 7 題 |
 | 6/22 | v7.3+C GPT-5.5 high (Codex proxy) | 129 | 74% | 90% | 68% | 78.3% | 5.5 反而比 5.4+C 低，prompt 對 5.4 更合 |
 | 6/23 | v12 GPT-5.4 high (Codex proxy) | 129 | **92%** | **93.8%** | **87.1%** | **91.5%** | +Capability Firewall, +Obligation Renderer, +Lighting DAG, +Fan Speed DAG, +Weather ETA Rewriter, +Promise Check, +Route Type Guard |
+| 6/23 | v12 GPT-5.4 medium (Codex proxy) | 129 | 88% | **97.9%** | 71% | **87.6%** | medium effort: hall 更高但 disamb 掉很多 |
 
 ### Baseline 對比
 
